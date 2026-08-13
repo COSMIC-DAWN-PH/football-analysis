@@ -39,6 +39,15 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("--task", choices=("ball", "pitch"), required=True)
     validate.add_argument("--data", type=Path, required=True, help="Dataset data.yaml")
     validate.add_argument("--report", type=Path)
+
+    mine = subparsers.add_parser(
+        "mine-hard-negatives",
+        help="Export likely white-line/low-confidence false positives for manual review",
+    )
+    mine.add_argument("--video", type=Path, required=True)
+    mine.add_argument("--object-tracks", type=Path, required=True)
+    mine.add_argument("--output-dir", type=Path, required=True)
+    mine.add_argument("--max-frames", type=int, default=800)
     return parser
 
 
@@ -153,6 +162,69 @@ def unpack_export(args: argparse.Namespace) -> None:
     if len(data_files) != 1:
         raise ValueError(f"Expected one data.yaml in export, found {len(data_files)}")
     print(data_files[0])
+
+
+def mine_hard_negatives(args: argparse.Namespace) -> None:
+    if not args.video.is_file() or not args.object_tracks.is_file():
+        raise FileNotFoundError("Video and object_tracks.jsonl must both exist")
+    image_dir = args.output_dir / "images"
+    label_dir = args.output_dir / "labels"
+    image_dir.mkdir(parents=True, exist_ok=True)
+    label_dir.mkdir(parents=True, exist_ok=True)
+    capture = cv2.VideoCapture(str(args.video))
+    if not capture.isOpened():
+        raise ValueError(f"Could not open {args.video}")
+    rows = []
+    with args.object_tracks.open(encoding="utf-8") as handle:
+        for frame_index, line in enumerate(handle):
+            ok, frame = capture.read()
+            if not ok or len(rows) >= args.max_frames:
+                break
+            payload = json.loads(line)
+            balls = payload.get("ball", {})
+            selected = next(iter(balls.values()), None)
+            if selected is None or not selected.get("observed", False):
+                continue
+            reasons = set(selected.get("rejection_reasons", []))
+            likely_hard_negative = (
+                "pitch_marking_overlap" in reasons
+                or "low_ball_confidence" in reasons
+                or float(selected.get("line_score", 0.0)) >= 0.50
+            )
+            if not likely_hard_negative:
+                continue
+            stem = f"hard-negative-{args.video.stem}-{frame_index:08d}"
+            image_path = image_dir / f"{stem}.jpg"
+            label_path = label_dir / f"{stem}.txt"
+            cv2.imwrite(str(image_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            label_path.write_text("", encoding="utf-8")
+            rows.append(
+                {
+                    "image": image_path.name,
+                    "source_video": str(args.video.resolve()),
+                    "source_frame": frame_index,
+                    "reasons": "|".join(sorted(reasons)),
+                    "candidate_bbox": json.dumps(selected.get("bbox")),
+                    "review_required": "true",
+                }
+            )
+    capture.release()
+    manifest_path = args.output_dir / "hard_negative_manifest.csv"
+    with manifest_path.open("w", newline="", encoding="utf-8-sig") as handle:
+        fieldnames = list(rows[0]) if rows else [
+            "image",
+            "source_video",
+            "source_frame",
+            "reasons",
+            "candidate_bbox",
+            "review_required",
+        ]
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    print(
+        f"Exported {len(rows)} review-required hard-negative candidates to {args.output_dir}"
+    )
 
 
 def validate_dataset(data_path: Path, task: str) -> dict:
@@ -327,6 +399,8 @@ def main() -> None:
         extract_frames(args)
     elif args.command == "unpack":
         unpack_export(args)
+    elif args.command == "mine-hard-negatives":
+        mine_hard_negatives(args)
     else:
         report = validate_dataset(args.data, args.task)
         output = json.dumps(report, ensure_ascii=False, indent=2)

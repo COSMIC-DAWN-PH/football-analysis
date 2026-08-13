@@ -75,6 +75,25 @@ def main() -> int:
             ok = False
         else:
             print(f"OK: keypoint shape {keypoint_shape}")
+        from tracking import validate_keypoint_model_for_promotion
+
+        keypoint_candidates = (
+            Path("models/weights/keypoints-detection_openvino_model_fp16"),
+            Path("models/weights/keypoints-detection_openvino_model"),
+            Path("models/weights/keypoints-detection.pt"),
+        )
+        keypoint_runtime_path = next(
+            (path for path in keypoint_candidates if path.exists()), None
+        )
+        if keypoint_runtime_path is not None:
+            keypoint_promotion_errors = validate_keypoint_model_for_promotion(
+                keypoint_runtime_path
+            )
+            if keypoint_promotion_errors:
+                print(
+                    "PROMOTION BLOCKED: " + "; ".join(keypoint_promotion_errors)
+                )
+                ok = False
 
         ball_candidates = (
             Path("models/weights/ball-detection_openvino_model_fp16"),
@@ -93,6 +112,14 @@ def main() -> int:
                 ok = False
             else:
                 print(f"OK: ball classes {ball_names} ({ball_path})")
+            from tracking import validate_ball_model_for_promotion
+
+            promotion_errors = validate_ball_model_for_promotion(ball_path)
+            if promotion_errors:
+                print("PROMOTION BLOCKED: " + "; ".join(promotion_errors))
+                ok = False
+            else:
+                print("OK: ball model meets dynamic 1280 YOLO11s promotion policy")
 
     print("Setup is ready." if ok else "Setup needs attention.")
     return 0 if ok else 1

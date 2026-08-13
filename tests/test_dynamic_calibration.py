@@ -3,7 +3,12 @@ import unittest
 import cv2
 import numpy as np
 
-from position_mappers import DynamicCameraCalibrator, PitchGeometry
+from position_mappers import (
+    CameraProfile,
+    DynamicCameraCalibrator,
+    PitchAnchorSet,
+    PitchGeometry,
+)
 from speed_estimation import SpeedEstimator
 
 
@@ -88,6 +93,63 @@ class DynamicCalibrationTests(unittest.TestCase):
         self.assertTrue(after_cut.valid)
         self.assertTrue(after_cut.reset_required)
         self.assertEqual(after_cut.status, "detected_reset")
+
+    def test_sudden_zoom_invalidates_locked_camera_profile(self) -> None:
+        profile = CameraProfile(
+            np.asarray([[1200.0, 0, 960], [0, 1200.0, 540], [0, 0, 1]]),
+            np.zeros(5),
+            1920,
+            1080,
+            "locked",
+        )
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        frame[:] = (0, 180, 0)
+        calibrator = DynamicCameraCalibrator(self.geometry, camera_profile=profile)
+        points = self._image_points()
+        first = calibrator.update(
+            frame, points, {index: 0.9 for index in points}, 0.0
+        )
+        self.assertTrue(first.valid)
+        center = np.asarray([960.0, 540.0])
+        zoomed = {
+            index: tuple((np.asarray(point) - center) * 1.2 + center)
+            for index, point in points.items()
+        }
+        result = calibrator.update(
+            frame, zoomed, {index: 0.9 for index in zoomed}, 1 / 30.0
+        )
+        self.assertFalse(result.valid)
+        self.assertTrue(result.zoom_changed)
+        self.assertEqual(result.failure_reason, "zoom_changed")
+
+    def test_manual_anchors_initialize_pose_without_keypoint_detection(self) -> None:
+        image_points = self._image_points()
+        indexes = [0, 5, 24, 29]
+        anchors = PitchAnchorSet(
+            image_points=np.asarray([image_points[index] for index in indexes]),
+            pitch_points=self.geometry.vertices[indexes],
+            reference_frame=0,
+        )
+        profile = CameraProfile(
+            np.asarray([[1200.0, 0, 960], [0, 1200.0, 540], [0, 0, 1]]),
+            np.zeros(5),
+            1920,
+            1080,
+            "manual",
+        )
+        calibrator = DynamicCameraCalibrator(
+            self.geometry, camera_profile=profile, pitch_anchors=anchors
+        )
+        result = calibrator.update(
+            np.zeros((1080, 1920, 3), dtype=np.uint8),
+            {},
+            {},
+            0.0,
+            frame_index=0,
+        )
+        self.assertTrue(result.valid)
+        self.assertEqual(result.status, "anchored")
+        self.assertTrue(result.has_metric_pose)
 
 
 class SpeedEstimatorTests(unittest.TestCase):

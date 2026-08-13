@@ -18,11 +18,121 @@ from position_mappers import CalibrationResult, PitchGeometry
 class BallCandidate:
     bbox: tuple[float, float, float, float]
     confidence: float
+    source: str = "detector"
+    appearance_score: float = 0.5
+    line_score: float = 0.0
+    verifier_score: Optional[float] = None
+    verifier_threshold: Optional[float] = None
 
     @property
     def center(self) -> tuple[float, float]:
         x1, y1, x2, y2 = self.bbox
         return (x1 + x2) / 2, (y1 + y2) / 2
+
+
+@dataclass(frozen=True)
+class _BallHypothesis:
+    """One path in the fixed-lag candidate beam."""
+
+    candidate: BallCandidate
+    position_m: Optional[np.ndarray]
+    cumulative_score: float
+    observations: int
+
+    @property
+    def mean_score(self) -> float:
+        return self.cumulative_score / max(1, self.observations)
+
+
+def inspect_ball_model_export(path: str | Path) -> dict[str, object]:
+    """Read deployment metadata without loading model weights."""
+    model_path = Path(path)
+    metadata_path = model_path / "metadata.yaml" if model_path.is_dir() else None
+    if metadata_path is None or not metadata_path.is_file():
+        return {
+            "path": str(model_path),
+            "format": model_path.suffix.lower().lstrip(".") or "unknown",
+            "metadata_available": False,
+            "dynamic": None,
+            "imgsz": None,
+            "model_family": None,
+        }
+    metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}
+    image_size = metadata.get("imgsz")
+    if isinstance(image_size, (list, tuple)):
+        image_size = max(int(value) for value in image_size)
+    elif image_size is not None:
+        image_size = int(image_size)
+    description = str(metadata.get("description", ""))
+    return {
+        "path": str(model_path),
+        "format": "openvino",
+        "metadata_available": True,
+        "dynamic": bool((metadata.get("args") or {}).get("dynamic")),
+        "imgsz": image_size,
+        "model_family": description.split(" model", 1)[0].replace("Ultralytics ", "") or None,
+        "names": metadata.get("names"),
+    }
+
+
+def validate_ball_model_for_promotion(
+    path: str | Path,
+    *,
+    minimum_imgsz: int = 1280,
+    require_dynamic: bool = True,
+    required_family: str = "YOLO11s",
+) -> list[str]:
+    """Return deployment-policy failures that block promotion to runtime weights."""
+    profile = inspect_ball_model_export(path)
+    errors: list[str] = []
+    if not bool(profile.get("metadata_available")):
+        errors.append(
+            "formal promotion requires an exported model directory with metadata.yaml"
+        )
+    if require_dynamic and not bool(profile.get("dynamic")):
+        errors.append("ball model export must use dynamic=True")
+    image_size = profile.get("imgsz")
+    if image_size is not None and int(image_size) < minimum_imgsz:
+        errors.append(f"ball model export imgsz must be at least {minimum_imgsz}")
+    family = profile.get("model_family")
+    if family is not None and str(family).casefold() != required_family.casefold():
+        errors.append(f"ball model family must be {required_family}, found {family}")
+    names = profile.get("names")
+    if isinstance(names, dict):
+        normalized = [names[key] for key in sorted(names, key=lambda value: int(value))]
+        if normalized != ["ball"]:
+            errors.append(f"ball model classes must be ['ball'], found {normalized}")
+    return errors
+
+
+def ball_verifier_threshold_path(path: str | Path) -> Path:
+    model_path = Path(path)
+    return (
+        model_path / "verifier_threshold.json"
+        if model_path.is_dir()
+        else model_path.with_suffix(".verifier.json")
+    )
+
+
+def validate_ball_verifier_for_promotion(path: str | Path) -> list[str]:
+    """Require the validation-selected operating point for formal use."""
+    import json
+
+    threshold_path = ball_verifier_threshold_path(path)
+    if not threshold_path.is_file():
+        return [f"ball verifier threshold sidecar is missing: {threshold_path}"]
+    try:
+        payload = json.loads(threshold_path.read_text(encoding="utf-8"))
+        threshold = float(payload["decision_threshold"])
+        recall = float(payload["recall"])
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return [f"ball verifier threshold sidecar is invalid: {threshold_path}"]
+    errors = []
+    if not 0.0 <= threshold <= 1.0:
+        errors.append("ball verifier decision threshold must be between 0 and 1")
+    if recall < 0.75:
+        errors.append("ball verifier validation recall must be at least 75%")
+    return errors
 
 
 def overlapping_tiles(
@@ -91,6 +201,7 @@ class BallDetector:
         global_imgsz: int = 1920,
         tile_imgsz: int = 1280,
         overlap: float = 0.20,
+        verifier_model_path: Optional[str] = None,
     ) -> None:
         path = Path(model_path)
         self.model = YOLO(model_path, task="detect")
@@ -101,6 +212,9 @@ class BallDetector:
         self.tile_imgsz = fixed_size or tile_imgsz
         self.confidence = confidence
         self.overlap = overlap
+        self.verifier = (
+            BallVerifier(verifier_model_path) if verifier_model_path is not None else None
+        )
 
     @staticmethod
     def _fixed_export_size(path: Path) -> int | None:
@@ -124,13 +238,23 @@ class BallDetector:
 
     def _detect_frame(self, frame: np.ndarray) -> list[BallCandidate]:
         candidates: list[BallCandidate] = []
-        candidates.extend(self._predict(frame, 0, 0, self.global_imgsz))
+        candidates.extend(self._predict(frame, 0, 0, self.global_imgsz, "global"))
         for tile, offset_x, offset_y in overlapping_tiles(frame, overlap=self.overlap):
-            candidates.extend(self._predict(tile, offset_x, offset_y, self.tile_imgsz))
-        return non_max_suppression(candidates)
+            candidates.extend(
+                self._predict(tile, offset_x, offset_y, self.tile_imgsz, "tile")
+            )
+        return [
+            self._with_visual_evidence(frame, candidate)
+            for candidate in non_max_suppression(candidates)
+        ]
 
     def _predict(
-        self, frame: np.ndarray, offset_x: int, offset_y: int, image_size: int
+        self,
+        frame: np.ndarray,
+        offset_x: int,
+        offset_y: int,
+        image_size: int,
+        source: str,
     ) -> list[BallCandidate]:
         result = self.model.predict(
             frame,
@@ -164,9 +288,128 @@ class BallDetector:
                 BallCandidate(
                     bbox=offset_bbox((x1, y1, x2, y2), offset_x, offset_y),
                     confidence=float(confidence),
+                    source=source,
                 )
             )
         return candidates
+
+    def _with_visual_evidence(
+        self, frame: np.ndarray, candidate: BallCandidate
+    ) -> BallCandidate:
+        """Estimate whether the candidate sits on an elongated white pitch marking."""
+        height, width = frame.shape[:2]
+        cx, cy = candidate.center
+        box_width = max(2.0, candidate.bbox[2] - candidate.bbox[0])
+        box_height = max(2.0, candidate.bbox[3] - candidate.bbox[1])
+        radius = int(max(16.0, 4.0 * max(box_width, box_height)))
+        x1, x2 = max(0, int(cx) - radius), min(width, int(cx) + radius + 1)
+        y1, y2 = max(0, int(cy) - radius), min(height, int(cy) + radius + 1)
+        patch = frame[y1:y2, x1:x2]
+        if patch.size == 0:
+            return candidate
+        hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
+        white = cv2.inRange(hsv, np.asarray([0, 0, 145]), np.asarray([180, 90, 255]))
+        edges = cv2.Canny(white, 50, 150)
+        lines = cv2.HoughLinesP(
+            edges,
+            1,
+            np.pi / 180,
+            threshold=max(6, radius // 3),
+            minLineLength=max(6, int(max(box_width, box_height) * 2.0)),
+            maxLineGap=max(2, radius // 5),
+        )
+        longest = 0.0
+        if lines is not None:
+            for line in lines[:, 0]:
+                longest = max(
+                    longest,
+                    hypot(float(line[2] - line[0]), float(line[3] - line[1])),
+                )
+        line_score = min(1.0, longest / max(1.0, radius * 1.5))
+        center_radius = max(2, int(min(box_width, box_height) / 2))
+        local_center_x = int(round(cx)) - x1
+        local_center_y = int(round(cy)) - y1
+        local = white[
+            max(0, local_center_y - center_radius) : min(
+                white.shape[0], local_center_y + center_radius + 1
+            ),
+            max(0, local_center_x - center_radius) : min(
+                white.shape[1], local_center_x + center_radius + 1
+            ),
+        ]
+        white_ratio = float(np.mean(local > 0)) if local.size else 0.0
+        heuristic_score = float(np.clip(0.35 + 0.65 * white_ratio, 0.0, 1.0))
+        verifier_score = (
+            self.verifier.score(frame, candidate)
+            if self.verifier is not None
+            else None
+        )
+        appearance_score = verifier_score if verifier_score is not None else heuristic_score
+        return BallCandidate(
+            bbox=candidate.bbox,
+            confidence=candidate.confidence,
+            source=candidate.source,
+            appearance_score=appearance_score,
+            line_score=line_score,
+            verifier_score=verifier_score,
+            verifier_threshold=(
+                self.verifier.decision_threshold
+                if self.verifier is not None
+                else None
+            ),
+        )
+
+
+class BallVerifier:
+    """Optional learned ball/non-ball Adapter at the candidate-verification Seam."""
+
+    def __init__(self, model_path: str, image_size: int = 128) -> None:
+        self.model = YOLO(model_path, task="classify")
+        self.image_size = image_size
+        path = Path(model_path)
+        threshold_path = ball_verifier_threshold_path(path)
+        self.decision_threshold = 0.50
+        if threshold_path.is_file():
+            import json
+
+            payload = json.loads(threshold_path.read_text(encoding="utf-8"))
+            self.decision_threshold = float(payload["decision_threshold"])
+            if not 0.0 <= self.decision_threshold <= 1.0:
+                raise ValueError("Ball verifier decision threshold must be between 0 and 1")
+        names = self.model.names
+        normalized = {
+            str(name).casefold(): int(index) for index, name in names.items()
+        } if isinstance(names, dict) else {
+            str(name).casefold(): index for index, name in enumerate(names)
+        }
+        if "ball" not in normalized:
+            raise ValueError("Ball verifier classes must include 'ball'")
+        self.ball_index = normalized["ball"]
+
+    def score(self, frame: np.ndarray, candidate: BallCandidate) -> float:
+        height, width = frame.shape[:2]
+        cx, cy = candidate.center
+        side = max(
+            32,
+            int(
+                max(
+                    candidate.bbox[2] - candidate.bbox[0],
+                    candidate.bbox[3] - candidate.bbox[1],
+                )
+                * 4.0
+            ),
+        )
+        half = side // 2
+        x1, x2 = max(0, int(cx) - half), min(width, int(cx) + half + 1)
+        y1, y2 = max(0, int(cy) - half), min(height, int(cy) + half + 1)
+        crop = frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            return 0.0
+        result = self.model.predict(crop, imgsz=self.image_size, verbose=False)[0]
+        if result.probs is None:
+            return 0.0
+        probabilities = result.probs.data.detach().cpu().numpy()
+        return float(probabilities[self.ball_index])
 
 
 class ConstantVelocityKalman:
@@ -246,11 +489,17 @@ class BallTracker:
         maximum_prediction_seconds: float = 0.5,
         restart_gap_seconds: float = 0.15,
         confirmations_required: int = 3,
+        minimum_confirmation_confidence: float = 0.15,
+        fixed_lag_seconds: float = 0.0,
+        ambiguity_margin: float = 0.04,
     ) -> None:
         self.geometry = geometry
         self.maximum_prediction_seconds = maximum_prediction_seconds
         self.restart_gap_seconds = restart_gap_seconds
         self.confirmations_required = confirmations_required
+        self.minimum_confirmation_confidence = minimum_confirmation_confidence
+        self.fixed_lag_seconds = fixed_lag_seconds
+        self.ambiguity_margin = ambiguity_margin
         self.track_segment = 0
         self._reset_motion_state()
 
@@ -262,6 +511,14 @@ class BallTracker:
         self.track_confidence = 0.0
         self.confirmation_count = 0
         self.segment_confirmed = False
+        self.segment_started_timestamp: Optional[float] = None
+        self.track_length = 0
+        self.selected_score = 0.0
+        self.track_state = "tentative"
+        self.rejection_reasons: list[str] = []
+        self._last_ambiguous = False
+        self._last_hypothesis_count = 0
+        self._hypotheses: list[_BallHypothesis] = []
 
     def update(
         self,
@@ -295,8 +552,15 @@ class BallTracker:
         )
         if selected is not None and continuing_segment:
             candidate, position_m = selected
-            return self._accept_observation(candidate, position_m, timestamp_seconds)
+            return self._accept_observation(
+                candidate,
+                position_m,
+                timestamp_seconds,
+                candidate_count=len(valid_candidates),
+            )
         if valid_candidates:
+            if not continuing_segment:
+                self._hypotheses = []
             restart = self._select_candidate(
                 valid_candidates,
                 predicted_center,
@@ -308,7 +572,12 @@ class BallTracker:
             )
             if restart is not None:
                 candidate, position_m = restart
-                return self._start_segment(candidate, position_m, timestamp_seconds)
+                return self._start_segment(
+                    candidate,
+                    position_m,
+                    timestamp_seconds,
+                    candidate_count=len(valid_candidates),
+                )
         return self._predicted_track(
             predicted_center, predicted_position, timestamp_seconds, calibration
         )
@@ -373,8 +642,9 @@ class BallTracker:
                 x1, _y1, x2, y2 = player["bbox"]
                 player_feet.append(np.asarray([(x1 + x2) / 2, y2]))
 
-        best: Optional[tuple[BallCandidate, Optional[np.ndarray]]] = None
-        best_score = -float("inf")
+        scored_candidates: list[
+            tuple[float, BallCandidate, Optional[np.ndarray]]
+        ] = []
         for candidate, position in candidates:
             center = np.asarray(candidate.center)
             bbox_width = candidate.bbox[2] - candidate.bbox[0]
@@ -383,6 +653,19 @@ class BallTracker:
             if max(bbox_width, bbox_height) > maximum_size:
                 continue
             score = candidate.confidence
+            score += 0.12 * candidate.appearance_score
+            if candidate.verifier_score is not None:
+                verifier_threshold = (
+                    candidate.verifier_threshold
+                    if candidate.verifier_threshold is not None
+                    else 0.50
+                )
+                score += 0.50 * (candidate.verifier_score - verifier_threshold)
+            score -= 0.40 * candidate.line_score
+            if position is not None:
+                marking_distance = self.geometry.distance_to_marking(tuple(position))
+                if marking_distance < 0.35:
+                    score -= 0.20 * (1.0 - marking_distance / 0.35)
             if predicted_position is not None and position is not None:
                 distance = float(np.linalg.norm(position - predicted_position))
                 if enforce_motion_gate and distance > maximum_metric_distance:
@@ -396,26 +679,94 @@ class BallTracker:
             if player_feet:
                 nearest_player = min(float(np.linalg.norm(center - foot)) for foot in player_feet)
                 score += 0.10 * max(0.0, 1.0 - nearest_player / 150.0)
-            if score > best_score:
-                best = (candidate, position)
-                best_score = score
-        return best
+            scored_candidates.append((float(score), candidate, position))
+        if not scored_candidates:
+            return None
+
+        next_hypotheses: list[_BallHypothesis] = []
+        for base_score, candidate, position in scored_candidates:
+            best_path = _BallHypothesis(candidate, position, base_score, 1)
+            best_rank = base_score
+            center = np.asarray(candidate.center, dtype=np.float64)
+            for previous in self._hypotheses:
+                previous_center = np.asarray(previous.candidate.center, dtype=np.float64)
+                if previous.position_m is not None and position is not None:
+                    continuity = float(np.linalg.norm(position - previous.position_m))
+                    normalized_continuity = continuity / max(maximum_metric_distance, 1e-6)
+                else:
+                    continuity = float(np.linalg.norm(center - previous_center))
+                    normalized_continuity = continuity / max(maximum_image_distance, 1e-6)
+                if normalized_continuity > 2.0:
+                    continue
+                cumulative = (
+                    previous.cumulative_score
+                    + base_score
+                    - 0.18 * normalized_continuity
+                )
+                observations = previous.observations + 1
+                rank = cumulative / observations + min(0.08, observations * 0.01)
+                if rank > best_rank:
+                    best_path = _BallHypothesis(
+                        candidate,
+                        position,
+                        cumulative,
+                        observations,
+                    )
+                    best_rank = rank
+            next_hypotheses.append(best_path)
+
+        next_hypotheses.sort(
+            key=lambda hypothesis: (
+                hypothesis.mean_score
+                + min(0.08, hypothesis.observations * 0.01)
+            ),
+            reverse=True,
+        )
+        self._hypotheses = next_hypotheses[:3]
+        ranked_scores = [
+            hypothesis.mean_score
+            + min(0.08, hypothesis.observations * 0.01)
+            for hypothesis in self._hypotheses
+        ]
+        best_hypothesis = self._hypotheses[0]
+        self._last_hypothesis_count = len(self._hypotheses)
+        self._last_ambiguous = (
+            len(ranked_scores) > 1
+            and ranked_scores[0] - ranked_scores[1] < self.ambiguity_margin
+        )
+        self.selected_score = float(ranked_scores[0])
+        return best_hypothesis.candidate, best_hypothesis.position_m
 
     def _start_segment(
         self,
         candidate: BallCandidate,
         position_m: Optional[np.ndarray],
         timestamp: float,
+        candidate_count: int,
     ) -> dict[int, dict]:
         self.track_segment += 1
+        selected_score = self.selected_score
+        ambiguous = self._last_ambiguous
+        hypothesis_count = self._last_hypothesis_count
+        hypotheses = list(self._hypotheses)
         self._reset_motion_state()
-        return self._accept_observation(candidate, position_m, timestamp)
+        self.selected_score = selected_score
+        self._last_ambiguous = ambiguous
+        self._last_hypothesis_count = hypothesis_count
+        self._hypotheses = hypotheses
+        return self._accept_observation(
+            candidate,
+            position_m,
+            timestamp,
+            candidate_count=candidate_count,
+        )
 
     def _accept_observation(
         self,
         candidate: BallCandidate,
         position_m: Optional[np.ndarray],
         timestamp: float,
+        candidate_count: int,
     ) -> dict[int, dict]:
         center = np.asarray(candidate.center, dtype=np.float64)
         filtered_center = self.image_filter.correct(center, timestamp)
@@ -428,13 +779,56 @@ class BallTracker:
         )
         self.last_bbox_size = bbox_size
         self.last_observed_timestamp = timestamp
+        if self.segment_started_timestamp is None:
+            self.segment_started_timestamp = timestamp
         self.track_confidence = (
             candidate.confidence
             if self.track_confidence == 0
             else 0.7 * self.track_confidence + 0.3 * candidate.confidence
         )
         self.confirmation_count += 1
-        self.segment_confirmed = self.confirmation_count >= self.confirmations_required
+        self.track_length += 1
+        elapsed = timestamp - self.segment_started_timestamp
+        marking_distance = (
+            self.geometry.distance_to_marking(tuple(filtered_position))
+            if filtered_position is not None
+            else float("inf")
+        )
+        line_like = candidate.line_score >= 0.55 or marking_distance < 0.20
+        evidence_confidence = self.track_confidence >= self.minimum_confirmation_confidence
+        verifier_rejected = (
+            candidate.verifier_score is not None
+            and candidate.verifier_score
+            < (
+                candidate.verifier_threshold
+                if candidate.verifier_threshold is not None
+                else 0.50
+            )
+        )
+        if verifier_rejected:
+            evidence_confidence = False
+        if line_like and self.track_confidence < 0.35:
+            evidence_confidence = False
+        self.segment_confirmed = (
+            self.confirmation_count >= self.confirmations_required
+            and elapsed >= self.fixed_lag_seconds
+            and evidence_confidence
+            and not self._last_ambiguous
+        )
+        self.track_state = (
+            "ambiguous"
+            if self._last_ambiguous
+            else "confirmed" if self.segment_confirmed else "tentative"
+        )
+        self.rejection_reasons = []
+        if self._last_ambiguous:
+            self.rejection_reasons.append("track_ambiguous")
+        if not evidence_confidence:
+            self.rejection_reasons.append("low_ball_confidence")
+        if verifier_rejected:
+            self.rejection_reasons.append("appearance_rejected")
+        if line_like:
+            self.rejection_reasons.append("pitch_marking_overlap")
         width, height = bbox_size
         center_x, center_y = filtered_center
         track = {
@@ -449,6 +843,16 @@ class BallTracker:
             "track_confidence": float(self.track_confidence),
             "track_segment": self.track_segment,
             "track_confirmed": self.segment_confirmed,
+            "track_state": self.track_state,
+            "track_length": self.track_length,
+            "selected_score": self.selected_score,
+            "candidate_count": int(candidate_count),
+            "hypothesis_count": self._last_hypothesis_count,
+            "appearance_score": candidate.appearance_score,
+            "line_score": candidate.line_score,
+            "verifier_score": candidate.verifier_score,
+            "verifier_threshold": candidate.verifier_threshold,
+            "rejection_reasons": list(self.rejection_reasons),
         }
         if filtered_position is not None and self.geometry.contains(
             tuple(filtered_position), margin_m=0.0
@@ -486,6 +890,12 @@ class BallTracker:
             "track_confidence": float(confidence),
             "track_segment": self.track_segment,
             "track_confirmed": confirmed,
+            "track_state": "occluded" if confirmed else "tentative",
+            "track_length": self.track_length,
+            "selected_score": self.selected_score,
+            "candidate_count": 0,
+            "hypothesis_count": self._last_hypothesis_count,
+            "rejection_reasons": ["insufficient_samples"],
         }
         if position_m is not None and calibration.image_to_pitch is not None:
             track["position_m"] = tuple(map(float, position_m))

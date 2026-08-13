@@ -3,14 +3,20 @@ from .abstract_video_processor import AbstractVideoProcessor
 from .object_annotator import ObjectAnnotator
 from .keypoints_annotator import KeypointsAnnotator
 from .projection_annotator import ProjectionAnnotator
-from position_mappers import ObjectPositionMapper, PitchGeometry
-from speed_estimation import BallSpeedEstimator, SpeedEstimator
+from position_mappers import (
+    CameraProfile,
+    ObjectPositionMapper,
+    PitchAnchorSet,
+    PitchGeometry,
+)
+from speed_estimation import BallKinematics3D, BallSpeedEstimator, SpeedEstimator
 from .frame_number_annotator import FrameNumberAnnotator
 from file_writing import TracksJsonWriter
 from tracking import BallDetector, BallTracker, ObjectTracker, KeypointsTracker
 from club_assignment import ClubAssigner
 from ball_to_player_assignment import BallToPlayerAssigner
 from utils import rgb_bgr_converter
+from diagnostics import RunDiagnostics
 
 import cv2
 import numpy as np
@@ -28,7 +34,11 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
                  club_assigner: ClubAssigner, ball_to_player_assigner: BallToPlayerAssigner, 
                  pitch_geometry: PitchGeometry, field_img_path: str,
                  save_tracks_dir: Optional[str] = None, draw_frame_num: bool = True,
-                 estimate_speed: bool = True, annotate_possession: bool = True) -> None:
+                 estimate_speed: bool = True, annotate_possession: bool = True,
+                 camera_profile: Optional[CameraProfile] = None,
+                 pitch_anchors: Optional[PitchAnchorSet] = None,
+                 speed_mode: Optional[str] = None,
+                 debug_diagnostics: bool = False) -> None:
         """
         Initializes the video processor with necessary components for tracking, annotations, and saving tracks.
 
@@ -44,7 +54,7 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
         """
 
         self.obj_tracker = obj_tracker
-        self.obj_annotator = ObjectAnnotator()
+        self.obj_annotator = ObjectAnnotator(debug_diagnostics=debug_diagnostics)
         self.kp_tracker = kp_tracker
         self.ball_detector = ball_detector
         self.ball_tracker = ball_tracker
@@ -53,7 +63,16 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
         self.ball_to_player_assigner = ball_to_player_assigner
         self.projection_annotator = ProjectionAnnotator()
         self.draw_frame_num = draw_frame_num
-        self.estimate_speed = estimate_speed
+        self.speed_mode = speed_mode or ("ground" if estimate_speed else "off")
+        if self.speed_mode not in {"off", "ground", "3d"}:
+            raise ValueError("speed_mode must be one of: off, ground, 3d")
+        if self.speed_mode == "3d" and (
+            camera_profile is None or pitch_anchors is None
+        ):
+            raise ValueError(
+                "speed_mode=3d requires a Camera Profile and Pitch Anchor Set"
+            )
+        self.estimate_speed = self.speed_mode != "off"
         self.annotate_possession = annotate_possession
         if self.draw_frame_num:
             self.frame_num_annotator = FrameNumberAnnotator() 
@@ -70,12 +89,19 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
         field_image = cv2.cvtColor(field_image, cv2.COLOR_GRAY2BGR)
 
         self.obj_mapper = ObjectPositionMapper(
-            pitch_geometry, display_size=(field_image.shape[1], field_image.shape[0])
+            pitch_geometry,
+            display_size=(field_image.shape[1], field_image.shape[0]),
+            camera_profile=camera_profile,
+            pitch_anchors=pitch_anchors,
         )
         self.speed_estimator = SpeedEstimator()
         self.ball_speed_estimator = BallSpeedEstimator()
-        self._calibration_invalid_since: Optional[float] = None
-        self._failure_reset_done = False
+        self.ball_kinematics_3d = (
+            BallKinematics3D(pitch_geometry, camera_profile)
+            if self.speed_mode == "3d" and camera_profile is not None
+            else None
+        )
+        self.run_diagnostics = RunDiagnostics()
         
         self.frame_num = 0
 
@@ -86,6 +112,7 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
         frames: List[np.ndarray],
         fps: float = 1e-6,
         timestamps: Optional[List[float]] = None,
+        source_frame_numbers: Optional[List[int]] = None,
     ) -> List[np.ndarray]:
         """
         Processes a batch of video frames, detects and tracks objects, assigns ball possession, and annotates the frames.
@@ -104,6 +131,10 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
             timestamps = [
                 (self.frame_num + index) / self.cur_fps for index in range(len(frames))
             ]
+        if source_frame_numbers is None:
+            source_frame_numbers = [
+                self.frame_num + index for index in range(len(frames))
+            ]
 
         # Detect objects and keypoints in all frames
         batch_obj_detections = self.obj_tracker.detect(frames)
@@ -113,13 +144,21 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
         processed_frames = []
 
         # Process each frame in the batch
-        for idx, (frame, object_detection, kp_detection, ball_candidates, timestamp) in enumerate(
+        for idx, (
+            frame,
+            object_detection,
+            kp_detection,
+            ball_candidates,
+            timestamp,
+            source_frame_number,
+        ) in enumerate(
             zip(
                 frames,
                 batch_obj_detections,
                 batch_kp_detections,
                 batch_ball_candidates,
                 timestamps,
+                source_frame_numbers,
             )
         ):
             
@@ -138,6 +177,7 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
                 frame,
                 float(timestamp),
                 self.kp_tracker.current_confidences,
+                frame_index=int(source_frame_number),
             )
             calibration = all_tracks["calibration"]
             initial_reset_required = calibration.reset_required
@@ -150,6 +190,7 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
                         frame,
                         float(timestamp),
                         self.kp_tracker.current_confidences,
+                        frame_index=int(source_frame_number),
                     )
                     calibration = all_tracks["calibration"]
                     if initial_reset_required:
@@ -158,22 +199,12 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
             if not calibration.valid:
                 self.kp_tracker.request_detection()
 
-            if calibration.valid:
-                self._calibration_invalid_since = None
-                self._failure_reset_done = False
-            elif self._calibration_invalid_since is None:
-                self._calibration_invalid_since = float(timestamp)
-            prolonged_failure = (
-                self._calibration_invalid_since is not None
-                and float(timestamp) - self._calibration_invalid_since > 1.0
-            )
-            if calibration.reset_required or (
-                prolonged_failure and not self._failure_reset_done
-            ):
+            if calibration.reset_required:
                 self.speed_estimator.reset()
                 self.ball_speed_estimator.reset()
+                if self.ball_kinematics_3d is not None:
+                    self.ball_kinematics_3d.reset()
                 self.ball_tracker.reset()
-                self._failure_reset_done = True
 
             ball_tracks = self.ball_tracker.update(
                 ball_candidates,
@@ -205,15 +236,36 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
                     float(timestamp),
                     projection_usable=calibration.speed_usable,
                 )
-                all_tracks['object'] = self.ball_speed_estimator.calculate_speed(
-                    all_tracks['object'],
-                    float(timestamp),
-                    calibration,
-                )
+                if self.speed_mode == "3d":
+                    assert self.ball_kinematics_3d is not None
+                    all_tracks['object'] = self.ball_kinematics_3d.calculate_speed(
+                        all_tracks['object'], float(timestamp), calibration
+                    )
+                else:
+                    all_tracks['object'] = self.ball_speed_estimator.calculate_speed(
+                        all_tracks['object'],
+                        float(timestamp),
+                        calibration,
+                    )
+
+            diagnostic_frame = self.run_diagnostics.record_frame(
+                float(timestamp),
+                calibration,
+                all_tracks['object'].get('ball', {}),
+                len(ball_candidates),
+                source_frame=int(source_frame_number),
+                processed_frame=self.frame_num,
+            )
             
             # Save tracking information if saving is enabled
             if self.save_tracks_dir:
-                self._save_tracks(all_tracks, float(timestamp))
+                self._save_tracks(
+                    all_tracks,
+                    float(timestamp),
+                    diagnostic_frame,
+                    source_frame=int(source_frame_number),
+                    processed_frame=self.frame_num,
+                )
 
             self.frame_num += 1
 
@@ -429,6 +481,9 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
         self,
         all_tracks: Dict[str, Dict[int, np.ndarray]],
         timestamp_seconds: float,
+        diagnostic_frame: dict,
+        source_frame: int,
+        processed_frame: int,
     ) -> None:
         """
         Saves the tracking information for objects and keypoints to the specified directory.
@@ -440,8 +495,17 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
         self.writer.write(self.writer.get_keypoints_tracks_path(), all_tracks['keypoints'])
         self.writer.write(
             self.writer.get_calibration_tracks_path(),
-            all_tracks["calibration"].serializable(timestamp_seconds),
+            all_tracks["calibration"].serializable(
+                timestamp_seconds,
+                source_frame=source_frame,
+                processed_frame=processed_frame,
+            ),
         )
+        self.writer.write(self.writer.get_diagnostics_path(), diagnostic_frame)
+
+    def finalize(self) -> None:
+        if self.save_tracks_dir:
+            self.writer.write_summary(self.run_diagnostics.summary())
 
     
 

@@ -16,7 +16,8 @@ A video-analysis pipeline for football footage. It detects and tracks players, g
 - Jersey-color team assignment with green-pitch masking and K-Means.
 - Top-down player projection and a dynamic Voronoi control view.
 - Timestamp-based robust player and ball speed estimation with a model-estimated possession overlay.
-- Native-resolution annotated MP4 plus per-frame object, keypoint, and calibration JSONL files.
+- Conservative ground/air ball kinematics with explicit uncertainty when camera intrinsics and pitch anchors are supplied.
+- Native-resolution annotated MP4 plus per-frame object, keypoint, calibration, and diagnostic JSONL files.
 - Optional tactical summaries, heatmaps, timelines, and quality metrics.
 - Headless execution and OpenVINO model-directory support.
 
@@ -142,6 +143,7 @@ Complete CLI:
 | `--object-model PATH` | automatic fallback | Object detector `.pt` file or OpenVINO model directory. |
 | `--keypoints-model PATH` | automatic fallback | Pitch pose `.pt` file or OpenVINO model directory. |
 | `--ball-model PATH` | automatic fallback | Dedicated ball detector `.pt` file or OpenVINO model directory. |
+| `--ball-verifier-model PATH` | none | Optional second-stage ball/non-ball classifier; required by `3d` mode. |
 | `--field-image PATH` | `input_videos/field_2d_v2.png` | Top-down pitch image used by the projection panel. |
 | `--pitch-length-m M` | required | Measured touchline length for this specific pitch. |
 | `--pitch-width-m M` | required | Measured goal-line width for this specific pitch. |
@@ -149,6 +151,10 @@ Complete CLI:
 | `--batch-size N` | `1` | Inference batch size; must be at least 1. |
 | `--skip-seconds N` | `0` | Skip the beginning of the source; cannot be negative. |
 | `--estimate-speed` / `--no-estimate-speed` | disabled | Calculate and draw smoothed player and ball speed. |
+| `--speed-mode off\|ground\|3d` | derived from `--estimate-speed` | Select no ball speed, ground-plane speed, or calibrated monocular 3D physics estimation. |
+| `--camera-profile PATH` | none | Camera Profile JSON created by `python -m calibration camera`. |
+| `--pitch-anchors PATH` | none | Pitch Anchor Set JSON created by `python -m calibration pitch`. |
+| `--debug-diagnostics` | disabled | Draw the current unavailable reason; normal output hides unreliable speed. |
 | `--annotate-possession` / `--no-annotate-possession` | disabled | Draw accumulated model-estimated possession. |
 | `--preview` / `--no-preview` | enabled | Show or suppress the live OpenCV window. |
 | `--club1-name NAME` | `Club1` | First team name. Use `Red` for compatibility with the current summary script. |
@@ -162,6 +168,26 @@ RGB arguments must contain exactly three integers from `0` to `255`.
 
 Run `python main.py --help` for the complete interface.
 
+### Reliable ball-speed modes
+
+`--speed-mode off|ground|3d` is the authoritative ball-speed switch. The older
+`--estimate-speed` option remains an alias for `ground` mode. `3d` mode requires
+a Camera Profile, a Pitch Anchor Set, a ball/non-ball verifier, and formally
+promoted dynamic 1280 ball/keypoint exports; it fails fast instead of silently
+falling back to a homography-based value.
+
+Create the calibration artifacts with:
+
+```powershell
+.\.venv\Scripts\python.exe -m calibration camera --images "checkerboard\*.jpg" --columns 9 --rows 6 --square-size-m 0.024 --profile-id camera-1 --output calibration-data\camera_profile.json
+.\.venv\Scripts\python.exe -m calibration pitch --video input_videos\match.mp4 --frame 0 --pitch-points "0,0;52.5,0;105,0;105,68;52.5,68;0,68" --output calibration-data\pitch_anchors.json
+```
+
+The remaining workflow is split into two authoritative documents:
+
+- [`plan/MANUAL_ACTIONS.md`](plan/MANUAL_ACTIONS.md) — user-provided captures, labels, reference data, and exact drop locations.
+- [`plan/SOFTWARE_NEXT_STEPS.md`](plan/SOFTWARE_NEXT_STEPS.md) — software work queue, generated outputs, promotion gates, and acceptance criteria.
+
 ## Outputs
 
 The main pipeline produces:
@@ -170,10 +196,12 @@ The main pipeline produces:
 - `<run-dir>/raw/object_tracks.jsonl`.
 - `<run-dir>/raw/keypoint_tracks.jsonl`.
 - `<run-dir>/raw/calibration_tracks.jsonl`.
+- `<run-dir>/raw/diagnostics.jsonl`.
+- `<run-dir>/raw/quality_summary.json`.
 
 By default, each run groups its annotated video, `raw` tracks, and `summary` artifacts in one task folder. `--output` and `--tracks-dir` remain available as explicit overrides.
 
-Each JSONL line represents one processed frame. Object records may include `bbox`, `confidence`, `position_m`, `projection`, `club`, `club_color`, `has_ball`, and `speed`. Ball records also expose `observed`, `track_confidence`, `track_segment`, `track_confirmed`, and `speed_status`. Ball `speed` is emitted only when a confirmed segment passes detection-confidence, calibration-quality, and robust-motion checks; otherwise `speed_status` is `pending` and the video shows `Ball speed: pending`.
+Each JSONL line represents one processed frame. Object records may include `bbox`, `confidence`, `position_m`, `projection`, `club`, `club_color`, `has_ball`, and `speed`. Ball records also expose `observed`, `track_confidence`, `track_segment`, `track_confirmed`, `track_state`, `speed_state`, and `speed_reason`. Ball `speed` is emitted only when a confirmed segment passes detection-confidence, calibration-quality, trajectory-observability, and uncertainty checks. Normal video hides unavailable values; `--debug-diagnostics` draws the exact reason such as `pose_stale`, `track_ambiguous`, or `uncertainty_high`.
 
 `object_tracks.jsonl` has four top-level object groups. JSON serialization turns numeric track IDs into strings:
 
@@ -185,7 +213,7 @@ Each JSONL line represents one processed frame. Object records may include `bbox
 
 The old upstream `object_tracks.json` array is a legacy format. New output uses JSON Lines: consume the file one line at a time rather than loading it as one JSON array. Starting a new run in the same track directory removes previous generated JSONL files.
 
-The video combines the source frame with IDs, team-colored annotations, pitch keypoints, and a top-down pitch projection. Valid player speed remains visible for about one second. Ball speed is shown only on frames that pass the trust gates; otherwise it is labeled `Ball speed: pending`. Unassigned possession is labeled `Unconfirmed`. Speed and possession graphics are controlled independently.
+The video combines the source frame with IDs, team-colored annotations, pitch keypoints, and a top-down pitch projection. Valid player speed remains visible for about one second. Ball speed is shown only on frames that pass the trust gates. Unassigned possession is labeled `Unconfirmed`. Speed and possession graphics are controlled independently.
 
 The generated video keeps the input frame dimensions and aspect ratio. Frames are encoded as MP4 after processing; the source audio track is not copied.
 

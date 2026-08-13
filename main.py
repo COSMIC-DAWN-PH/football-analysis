@@ -4,9 +4,17 @@ from pathlib import Path
 from annotation import FootballVideoProcessor
 from ball_to_player_assignment import BallToPlayerAssigner
 from club_assignment import Club, ClubAssigner
-from tracking import BallDetector, BallTracker, KeypointsTracker, ObjectTracker
+from tracking import (
+    BallDetector,
+    BallTracker,
+    KeypointsTracker,
+    ObjectTracker,
+    validate_ball_model_for_promotion,
+    validate_ball_verifier_for_promotion,
+    validate_keypoint_model_for_promotion,
+)
 from utils import process_video
-from position_mappers import PitchGeometry
+from position_mappers import CameraProfile, PitchAnchorSet, PitchGeometry
 
 
 DEFAULT_OBJECT_MODEL = Path("models/weights/object-detection_openvino_model_fp16")
@@ -83,6 +91,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--object-model", type=Path, default=DEFAULT_OBJECT_MODEL)
     parser.add_argument("--keypoints-model", type=Path, default=DEFAULT_KEYPOINTS_MODEL)
     parser.add_argument("--ball-model", type=Path, default=DEFAULT_BALL_MODEL)
+    parser.add_argument(
+        "--ball-verifier-model",
+        type=Path,
+        help="Optional ball/non-ball classification model for second-stage candidate verification",
+    )
     parser.add_argument("--field-image", type=Path, default=DEFAULT_FIELD_IMAGE)
     parser.add_argument(
         "--pitch-length-m",
@@ -109,6 +122,27 @@ def _build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=False,
         help="Estimate and draw player and ball speed (disabled by default for sampled video)",
+    )
+    parser.add_argument(
+        "--speed-mode",
+        choices=("off", "ground", "3d"),
+        default=None,
+        help="Ball-speed mode; --estimate-speed remains a compatibility alias for ground",
+    )
+    parser.add_argument(
+        "--camera-profile",
+        type=Path,
+        help="Camera Profile JSON produced by python -m calibration camera",
+    )
+    parser.add_argument(
+        "--pitch-anchors",
+        type=Path,
+        help="Pitch Anchor Set JSON produced by python -m calibration pitch",
+    )
+    parser.add_argument(
+        "--debug-diagnostics",
+        action="store_true",
+        help="Draw machine-readable unavailable reasons beside tentative ball tracks",
     )
     parser.add_argument(
         "--annotate-possession",
@@ -167,6 +201,52 @@ def main(argv: list[str] | None = None) -> None:
             args.field_image,
         ],
     )
+    _require_paths(
+        parser,
+        [
+            path
+            for path in (
+                args.camera_profile,
+                args.pitch_anchors,
+                args.ball_verifier_model,
+            )
+            if path is not None
+        ],
+    )
+    speed_mode = args.speed_mode or ("ground" if args.estimate_speed else "off")
+    if speed_mode == "3d":
+        missing_calibration = [
+            str(path)
+            for path in (args.camera_profile, args.pitch_anchors)
+            if path is None or not path.is_file()
+        ]
+        if missing_calibration:
+            parser.error(
+                "--speed-mode 3d requires --camera-profile and --pitch-anchors: "
+                + ", ".join(missing_calibration)
+            )
+        if args.ball_verifier_model is None or not args.ball_verifier_model.exists():
+            parser.error(
+                "--speed-mode 3d requires a promoted --ball-verifier-model for accuracy-first tracking"
+            )
+        promotion_errors = validate_ball_model_for_promotion(args.ball_model)
+        promotion_errors.extend(
+            validate_ball_verifier_for_promotion(args.ball_verifier_model)
+        )
+        promotion_errors.extend(
+            validate_keypoint_model_for_promotion(args.keypoints_model)
+        )
+        if promotion_errors:
+            parser.error(
+                "3D speed promotion checks failed: "
+                + "; ".join(promotion_errors)
+            )
+    camera_profile = (
+        CameraProfile.load(args.camera_profile) if args.camera_profile is not None else None
+    )
+    pitch_anchors = (
+        PitchAnchorSet.load(args.pitch_anchors) if args.pitch_anchors is not None else None
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.tracks_dir.mkdir(parents=True, exist_ok=True)
 
@@ -192,8 +272,13 @@ def main(argv: list[str] | None = None) -> None:
     except ValueError as exc:
         parser.error(str(exc))
 
-    ball_detector = BallDetector(str(args.ball_model))
-    ball_tracker = BallTracker(pitch_geometry)
+    ball_detector = BallDetector(
+        str(args.ball_model),
+        verifier_model_path=(
+            str(args.ball_verifier_model) if args.ball_verifier_model is not None else None
+        ),
+    )
+    ball_tracker = BallTracker(pitch_geometry, fixed_lag_seconds=0.20)
 
     processor = FootballVideoProcessor(
         obj_tracker,
@@ -208,6 +293,10 @@ def main(argv: list[str] | None = None) -> None:
         draw_frame_num=True,
         estimate_speed=args.estimate_speed,
         annotate_possession=args.annotate_possession,
+        camera_profile=camera_profile,
+        pitch_anchors=pitch_anchors,
+        speed_mode=speed_mode,
+        debug_diagnostics=args.debug_diagnostics,
     )
 
     process_video(

@@ -1,46 +1,21 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 from typing import Mapping, Optional
 
 import cv2
 import numpy as np
 
 from .pitch_geometry import PitchGeometry
+from .camera_geometry import (
+    CameraGeometry,
+    CameraPoseResult,
+    CameraProfile,
+    PitchAnchorSet,
+)
 
 
-@dataclass
-class CalibrationResult:
-    image_to_pitch: Optional[np.ndarray]
-    status: str = "invalid"
-    keypoints: int = 0
-    inliers: int = 0
-    inlier_ratio: float = 0.0
-    median_error_px: Optional[float] = None
-    span_length_ratio: float = 0.0
-    span_width_ratio: float = 0.0
-    flow_points: int = 0
-    flow_inliers: int = 0
-    flow_quality: float = 0.0
-    quality: float = 0.0
-    age_seconds: Optional[float] = None
-    reset_required: bool = False
-
-    @property
-    def valid(self) -> bool:
-        return self.image_to_pitch is not None
-
-    @property
-    def speed_usable(self) -> bool:
-        return self.valid and self.age_seconds is not None and self.age_seconds <= 0.5
-
-    def serializable(self, timestamp_seconds: float) -> dict:
-        result = asdict(self)
-        matrix = result.pop("image_to_pitch")
-        result["timestamp_seconds"] = timestamp_seconds
-        if matrix is not None:
-            result["image_to_pitch"] = matrix.tolist()
-        return result
+# Compatibility name retained for existing callers and stored artifacts.
+CalibrationResult = CameraPoseResult
 
 
 class DynamicCameraCalibrator:
@@ -58,6 +33,8 @@ class DynamicCameraCalibrator:
         max_propagation_seconds: float = 1.0,
         max_flow_error_px: float = 1.5,
         min_flow_points: int = 20,
+        camera_profile: Optional[CameraProfile] = None,
+        pitch_anchors: Optional[PitchAnchorSet] = None,
     ) -> None:
         self.geometry = geometry
         self.min_keypoints = min_keypoints
@@ -69,6 +46,9 @@ class DynamicCameraCalibrator:
         self.max_propagation_seconds = max_propagation_seconds
         self.max_flow_error_px = max_flow_error_px
         self.min_flow_points = min_flow_points
+        self.camera_geometry = CameraGeometry(geometry, camera_profile)
+        self.pitch_anchors = pitch_anchors
+        self._anchors_consumed = False
 
         self._image_to_pitch: Optional[np.ndarray] = None
         self._last_direct_timestamp: Optional[float] = None
@@ -78,6 +58,8 @@ class DynamicCameraCalibrator:
         self._feature_world_points: Optional[np.ndarray] = None
         self._previous_histogram: Optional[np.ndarray] = None
         self._abnormal_motion = False
+        self._moving_mask: Optional[np.ndarray] = None
+        self._zoom_invalid = False
 
     def reset(self) -> None:
         self._image_to_pitch = None
@@ -88,6 +70,9 @@ class DynamicCameraCalibrator:
         self._feature_world_points = None
         self._previous_histogram = None
         self._abnormal_motion = False
+        self._anchors_consumed = False
+        self._moving_mask = None
+        self._zoom_invalid = False
 
     def update(
         self,
@@ -95,11 +80,47 @@ class DynamicCameraCalibrator:
         keypoints: Mapping[int, tuple[float, float]],
         confidences: Optional[Mapping[int, float]],
         timestamp_seconds: float,
+        frame_index: Optional[int] = None,
+        moving_mask: Optional[np.ndarray] = None,
     ) -> CalibrationResult:
+        if self.camera_geometry.profile is not None:
+            try:
+                self.camera_geometry.profile.validate_frame_shape(frame.shape)
+            except ValueError:
+                return CalibrationResult(
+                    image_to_pitch=None,
+                    status="invalid",
+                    failure_reason="pose_invalid",
+                )
+        if self._zoom_invalid:
+            return CalibrationResult(
+                image_to_pitch=None,
+                status="zoom_changed",
+                failure_reason="zoom_changed",
+                zoom_changed=True,
+                reset_required=True,
+            )
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         histogram = self._frame_histogram(frame)
         previous_image_to_pitch = self._image_to_pitch
-        direct = self._estimate_direct(keypoints, confidences)
+        self._moving_mask = moving_mask
+        use_anchors = (
+            self.pitch_anchors is not None
+            and not self._anchors_consumed
+            and (
+                frame_index is None
+                or int(frame_index) >= int(self.pitch_anchors.reference_frame)
+            )
+        )
+        if use_anchors:
+            direct = self.camera_geometry.pose_from_correspondences(
+                self.pitch_anchors.image_points,
+                self.pitch_anchors.pitch_points,
+                status="anchored",
+            )
+            self._anchors_consumed = direct.valid
+        else:
+            direct = self._estimate_direct(keypoints, confidences)
         self._abnormal_motion = False
         flow = self._estimate_flow(gray)
 
@@ -118,6 +139,21 @@ class DynamicCameraCalibrator:
             > 0.25
         ):
             cut_likely = True
+        zoom_changed = (
+            previous_image_to_pitch is not None
+            and direct.valid
+            and self.camera_geometry.profile is not None
+            and abs(
+                self._camera_scale_ratio(
+                    previous_image_to_pitch, direct.image_to_pitch, gray.shape
+                )
+                - 1.0
+            )
+            > 0.08
+        )
+        cut_likely |= zoom_changed
+        if zoom_changed:
+            self._zoom_invalid = True
         if cut_likely:
             self._image_to_pitch = None
             self._last_direct_timestamp = None
@@ -139,11 +175,16 @@ class DynamicCameraCalibrator:
                     selected.flow_quality = flow[3] / flow[2]
             self._image_to_pitch = selected.image_to_pitch
             self._last_direct_timestamp = timestamp_seconds
-            self._last_direct_quality = selected.quality
             selected.age_seconds = 0.0
             selected.reset_required = cut_likely
+            selected.zoom_changed = zoom_changed
+            if zoom_changed:
+                selected.failure_reason = "zoom_changed"
             if cut_likely:
                 selected.status = "detected_reset"
+            self.camera_geometry.attach_metric_pose(selected)
+            self._apply_marking_quality(frame, selected)
+            self._last_direct_quality = selected.quality
             result = selected
         elif flow is not None and self._last_direct_timestamp is not None:
             age = max(0.0, timestamp_seconds - self._last_direct_timestamp)
@@ -160,6 +201,8 @@ class DynamicCameraCalibrator:
                     * max(0.0, 1.0 - age / self.max_propagation_seconds),
                     age_seconds=age,
                 )
+                self.camera_geometry.attach_metric_pose(result)
+                self._apply_marking_quality(frame, result)
             else:
                 self._image_to_pitch = None
                 result = direct
@@ -170,6 +213,12 @@ class DynamicCameraCalibrator:
                 result.status = "reset"
                 result.reset_required = True
 
+        if zoom_changed:
+            result.image_to_pitch = None
+            result.rotation_vector = None
+            result.translation_vector = None
+            result.status = "zoom_changed"
+            self._image_to_pitch = None
         self._previous_gray = gray
         self._previous_histogram = histogram
         if self._image_to_pitch is not None:
@@ -178,6 +227,40 @@ class DynamicCameraCalibrator:
             self._feature_image_points = None
             self._feature_world_points = None
         return result
+
+    def _apply_marking_quality(
+        self, frame: np.ndarray, result: CalibrationResult
+    ) -> None:
+        if result.image_to_pitch is None:
+            return
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        white = cv2.inRange(hsv, np.asarray([0, 0, 145]), np.asarray([180, 90, 255]))
+        if self._moving_mask is not None and self._moving_mask.shape == white.shape:
+            white[self._moving_mask.astype(bool)] = 0
+        if int(np.count_nonzero(white)) < max(50, int(white.size * 0.0002)):
+            return
+        try:
+            pitch_to_image = np.linalg.inv(result.image_to_pitch)
+        except np.linalg.LinAlgError:
+            return
+        points = self.geometry.marking_sample_points()
+        projected = cv2.perspectiveTransform(
+            points.reshape(-1, 1, 2), pitch_to_image
+        ).reshape(-1, 2)
+        height, width = white.shape
+        inside = (
+            (projected[:, 0] >= 0)
+            & (projected[:, 0] < width)
+            & (projected[:, 1] >= 0)
+            & (projected[:, 1] < height)
+        )
+        if int(inside.sum()) < 20:
+            return
+        distance = cv2.distanceTransform(255 - white, cv2.DIST_L2, 3)
+        pixels = np.rint(projected[inside]).astype(int)
+        errors = distance[pixels[:, 1], pixels[:, 0]]
+        result.marking_error_px = float(np.median(errors))
+        result.quality *= max(0.0, 1.0 - result.marking_error_px / 12.0)
 
     def _estimate_direct(
         self,
@@ -243,6 +326,7 @@ class DynamicCameraCalibrator:
             * min(1.0, length_span / self.min_length_span_ratio)
             * min(1.0, width_span / self.min_width_span_ratio)
         )
+        self.camera_geometry.attach_metric_pose(result)
         return result
 
     def _estimate_flow(
@@ -347,6 +431,40 @@ class DynamicCameraCalibrator:
         diagonal = float(np.hypot(width, height))
         return float(np.median(np.linalg.norm(moved - image_points, axis=1)) / diagonal)
 
+    @staticmethod
+    def _camera_scale_ratio(
+        previous_image_to_pitch: np.ndarray,
+        current_image_to_pitch: np.ndarray,
+        image_shape: tuple[int, int],
+    ) -> float:
+        height, width = image_shape
+        points = np.asarray(
+            [
+                [width * 0.25, height * 0.25],
+                [width * 0.75, height * 0.25],
+                [width * 0.25, height * 0.75],
+                [width * 0.75, height * 0.75],
+            ],
+            dtype=np.float32,
+        )
+        try:
+            previous_world = cv2.perspectiveTransform(
+                points.reshape(-1, 1, 2), previous_image_to_pitch
+            ).reshape(-1, 2)
+            current_pitch_to_image = np.linalg.inv(current_image_to_pitch)
+            moved = cv2.perspectiveTransform(
+                previous_world.reshape(-1, 1, 2), current_pitch_to_image
+            ).reshape(-1, 2)
+        except (cv2.error, np.linalg.LinAlgError):
+            return float("inf")
+        before = np.linalg.norm(points[1] - points[0]) + np.linalg.norm(
+            points[3] - points[2]
+        )
+        after = np.linalg.norm(moved[1] - moved[0]) + np.linalg.norm(
+            moved[3] - moved[2]
+        )
+        return float(after / before) if before > 0 else float("inf")
+
     def _fuse_direct_and_flow(
         self,
         keypoints: Mapping[int, tuple[float, float]],
@@ -416,6 +534,10 @@ class DynamicCameraCalibrator:
         image_corners[:, 0] = np.clip(image_corners[:, 0], 0, width - 1)
         image_corners[:, 1] = np.clip(image_corners[:, 1], 0, height - 1)
         cv2.fillConvexPoly(mask, image_corners.astype(np.int32), 255)
+        # The polygon already removes the stands. Moving-object boxes are excluded so
+        # Lucas-Kanade flow follows pitch texture/markings rather than players.
+        if self._moving_mask is not None and self._moving_mask.shape == mask.shape:
+            mask[self._moving_mask.astype(bool)] = 0
         features = cv2.goodFeaturesToTrack(
             gray,
             maxCorners=300,

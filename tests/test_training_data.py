@@ -2,13 +2,16 @@ import shutil
 import tempfile
 import unittest
 import csv
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import cv2
 import numpy as np
 import yaml
 
-from training.prepare_dataset import PITCH_FLIP_INDEX, validate_dataset
+from training.prepare_dataset import PITCH_FLIP_INDEX, mine_hard_negatives, validate_dataset
+from training.train_models import select_precision_first_threshold
 
 
 class DatasetValidationTests(unittest.TestCase):
@@ -58,6 +61,16 @@ class DatasetValidationTests(unittest.TestCase):
             list(range(32)),
         )
 
+    def test_verifier_threshold_maximizes_precision_at_required_recall(self) -> None:
+        result = select_precision_first_threshold(
+            [0.90, 0.80, 0.30, 0.20, 0.85, 0.10],
+            [True, True, True, True, False, False],
+            minimum_recall=0.75,
+        )
+        self.assertEqual(result["decision_threshold"], 0.20)
+        self.assertEqual(result["recall"], 1.0)
+        self.assertEqual(result["precision"], 0.80)
+
     def test_manifest_rejects_video_and_pitch_split_leakage(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -81,6 +94,51 @@ class DatasetValidationTests(unittest.TestCase):
         self.assertTrue(any("source_video 'match-a' crosses splits" in error for error in report["errors"]))
         self.assertTrue(any("pitch 'A' crosses splits" in error for error in report["errors"]))
         self.assertIn("Test split must contain at least one pitch unseen in train", report["errors"])
+
+    def test_hard_negative_mining_exports_review_required_frame(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            video_path = root / "sample.avi"
+            writer = cv2.VideoWriter(
+                str(video_path),
+                cv2.VideoWriter_fourcc(*"MJPG"),
+                10.0,
+                (64, 48),
+            )
+            writer.write(np.zeros((48, 64, 3), dtype=np.uint8))
+            writer.release()
+            tracks_path = root / "object_tracks.jsonl"
+            tracks_path.write_text(
+                json.dumps(
+                    {
+                        "ball": {
+                            "1": {
+                                "bbox": [10, 10, 15, 15],
+                                "observed": True,
+                                "line_score": 0.9,
+                                "rejection_reasons": ["pitch_marking_overlap"],
+                            }
+                        }
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            output = root / "mined"
+            mine_hard_negatives(
+                SimpleNamespace(
+                    video=video_path,
+                    object_tracks=tracks_path,
+                    output_dir=output,
+                    max_frames=10,
+                )
+            )
+            with (output / "hard_negative_manifest.csv").open(
+                newline="", encoding="utf-8-sig"
+            ) as handle:
+                rows = list(csv.DictReader(handle))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["review_required"], "true")
 
 
 if __name__ == "__main__":

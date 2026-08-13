@@ -61,8 +61,7 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
     cap = cv2.VideoCapture(video_source)
     
     if not cap.isOpened():
-        print("Error: Could not open video source.")
-        return
+        raise FileNotFoundError(f"Could not open video source: {video_source}")
 
     fps = float(cap.get(cv2.CAP_PROP_FPS))
     if not np.isfinite(fps) or fps <= 0:
@@ -77,7 +76,33 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
 
     frame_queue = queue.Queue(maxsize=100)
     processed_queue = queue.Queue(maxsize=100)
+    thread_errors: queue.Queue[tuple[str, BaseException]] = queue.Queue()
     stop_event = threading.Event()
+
+    def record_thread_error(stage: str, error: BaseException) -> None:
+        thread_errors.put((stage, error))
+        stop_event.set()
+
+    def signal_queue(target: queue.Queue) -> None:
+        while not stop_event.is_set():
+            try:
+                target.put(None, timeout=0.2)
+                return
+            except queue.Full:
+                continue
+        try:
+            target.put_nowait(None)
+        except queue.Full:
+            pass
+
+    def enqueue(target: queue.Queue, value: object) -> bool:
+        while not stop_event.is_set():
+            try:
+                target.put(value, timeout=0.2)
+                return True
+            except queue.Full:
+                continue
+        return False
     
     def signal_handler(signum, frame):
         """Signal handler to initiate shutdown on interrupt."""
@@ -103,13 +128,15 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
                 if not np.isfinite(timestamp) or timestamp <= last_timestamp:
                     timestamp = last_timestamp + 1.0 / fps
                 last_timestamp = timestamp
-                frame_queue.put((frame_count, timestamp, frame))
+                if not enqueue(frame_queue, (frame_count, timestamp, frame)):
+                    break
                 frame_count += 1
         except Exception as e:
             print(f"Error in frame capture: {e}")
+            record_thread_error("capture", e)
         finally:
             cap.release()
-            frame_queue.put(None)  # Signal end of capture
+            signal_queue(frame_queue)
         print("Frame capture complete")
 
     def frame_processing_thread() -> None:
@@ -135,8 +162,10 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
                 continue
             except Exception as e:
                 print(f"Error in frame processing: {e}")
+                record_thread_error("processing", e)
+                break
 
-        processed_queue.put(None)  # Signal end of processing
+        signal_queue(processed_queue)
         print("Frame processing complete")
 
     def process_batch(batch: List[Tuple[int, float, np.ndarray]]) -> None:
@@ -148,13 +177,16 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
         """
         frames = [frame for _, _, frame in batch]
         timestamps = [timestamp for _, timestamp, _ in batch]
-        try:
-            processed_batch = processor.process(frames, fps, timestamps)
-            for (frame_count, _, _), processed_frame in zip(batch, processed_batch):
-                processed_queue.put((frame_count, processed_frame))
-        except Exception as e:
-            print(f"Error processing batch: {e}")
-            traceback.print_exc()
+        source_frame_numbers = [frame_count for frame_count, _, _ in batch]
+        processed_batch = processor.process(
+            frames,
+            fps,
+            timestamps,
+            source_frame_numbers,
+        )
+        for (frame_count, _, _), processed_frame in zip(batch, processed_batch):
+            if not enqueue(processed_queue, (frame_count, processed_frame)):
+                break
 
     def frame_display_thread(temp_dir: str) -> None:
         """Thread to display processed frames."""
@@ -182,6 +214,8 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
                 continue
             except Exception as e:
                 print(f"Error displaying frame: {e}")
+                record_thread_error("display", e)
+                break
 
         if preview:
             cv2.destroyAllWindows()
@@ -210,13 +244,23 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
             for thread in threads:
                 thread.join(timeout=10)  # Give each thread 10 seconds to join
                 if thread.is_alive():
-                    print(f"Thread {thread.name} did not terminate gracefully")
+                    error = RuntimeError(
+                        f"Thread {thread.name} did not terminate gracefully"
+                    )
+                    thread_errors.put((thread.name, error))
 
             # Ensure all queues are empty
             while not frame_queue.empty():
                 frame_queue.get()
             while not processed_queue.empty():
                 processed_queue.get()
+
+            if processor is not None:
+                processor.finalize()
+
+            if not thread_errors.empty():
+                stage, error = thread_errors.get()
+                raise RuntimeError(f"Video {stage} stage failed: {error}") from error
 
             print("All threads have completed.")
             # Only convert to video if output_video is not None
@@ -227,6 +271,7 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
         except Exception as e:
             print(f"An error occurred: {e}")
             traceback.print_exc()
+            raise
 
         finally:
             cap.release()

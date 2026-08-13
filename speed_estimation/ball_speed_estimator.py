@@ -8,7 +8,8 @@ from typing import Any, Deque, Optional
 import cv2
 import numpy as np
 
-from position_mappers import CalibrationResult
+from position_mappers import CalibrationQualityPolicy, CalibrationResult
+from diagnostics import BallSpeedReason, BallSpeedState
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,7 @@ class BallSpeedEstimator:
         minimum_inlier_ratio: float = 0.75,
         minimum_direction_consistency: float = 0.75,
         maximum_calibration_shift_m: float = 1.5,
+        calibration_policy: Optional[CalibrationQualityPolicy] = None,
     ) -> None:
         self.minimum_samples = minimum_samples
         self.minimum_span_seconds = minimum_span_seconds
@@ -50,6 +52,10 @@ class BallSpeedEstimator:
         self.minimum_inlier_ratio = minimum_inlier_ratio
         self.minimum_direction_consistency = minimum_direction_consistency
         self.maximum_calibration_shift_m = maximum_calibration_shift_m
+        self.calibration_policy = calibration_policy or CalibrationQualityPolicy(
+            maximum_age_seconds=maximum_calibration_age_seconds,
+            minimum_quality=minimum_calibration_quality,
+        )
         self.history: Deque[BallSpeedSample] = deque()
         self.active_key: Optional[tuple[Any, int]] = None
         self.previous_homography: Optional[np.ndarray] = None
@@ -65,9 +71,15 @@ class BallSpeedEstimator:
             track.pop("speed", None)
             track.pop("_display_speed", None)
             track["speed_status"] = "pending"
+            track["speed_state"] = BallSpeedState.WARMING_UP.value
+            track["speed_reason"] = BallSpeedReason.INSUFFICIENT_SAMPLES.value
 
-        if not calibration.valid:
+        calibration_reason = self.calibration_policy.failure_reason(calibration)
+        if calibration_reason is not None:
             self.reset()
+            for track in balls.values():
+                track["speed_state"] = BallSpeedState.UNAVAILABLE.value
+                track["speed_reason"] = calibration_reason
             return tracks
 
         current_homography = calibration.image_to_pitch
@@ -80,13 +92,12 @@ class BallSpeedEstimator:
             self._clear_history()
         self.previous_homography = current_homography.copy()
 
-        if not self._calibration_usable(calibration):
-            self._clear_history()
-            return tracks
-
         active_ball_ids = list(balls)
         if len(active_ball_ids) != 1:
             self._clear_history()
+            for track in balls.values():
+                track["speed_state"] = BallSpeedState.UNAVAILABLE.value
+                track["speed_reason"] = BallSpeedReason.TRACK_AMBIGUOUS.value
             return tracks
 
         ball_id = active_ball_ids[0]
@@ -98,9 +109,13 @@ class BallSpeedEstimator:
             self.active_key = key
 
         if not track.get("observed", False):
+            track["speed_state"] = BallSpeedState.UNAVAILABLE.value
+            track["speed_reason"] = BallSpeedReason.INSUFFICIENT_SAMPLES.value
             return tracks
         position = track.get("position_m")
         if position is None:
+            track["speed_state"] = BallSpeedState.UNAVAILABLE.value
+            track["speed_reason"] = BallSpeedReason.POSE_INVALID.value
             return tracks
 
         sample = BallSpeedSample(
@@ -124,20 +139,24 @@ class BallSpeedEstimator:
             self.history.popleft()
 
         if not track.get("track_confirmed", False):
+            track["speed_reason"] = (
+                BallSpeedReason.TRACK_AMBIGUOUS.value
+                if track.get("track_state") == "ambiguous"
+                else BallSpeedReason.TRACK_TENTATIVE.value
+            )
             return tracks
         speed = self._trusted_speed()
         if speed is not None:
             track["speed"] = speed
             track["speed_status"] = "reliable"
+            track["speed_state"] = BallSpeedState.RELIABLE.value
+            track.pop("speed_reason", None)
+        else:
+            track["speed_reason"] = self._pending_reason(track)
         return tracks
 
     def _calibration_usable(self, calibration: CalibrationResult) -> bool:
-        return (
-            calibration.valid
-            and calibration.age_seconds is not None
-            and calibration.age_seconds <= self.maximum_calibration_age_seconds
-            and calibration.quality >= self.minimum_calibration_quality
-        )
+        return self.calibration_policy.usable(calibration)
 
     def _calibration_shifted(
         self,
@@ -145,7 +164,7 @@ class BallSpeedEstimator:
         current_homography: np.ndarray,
         calibration_status: str,
     ) -> bool:
-        direct_statuses = {"detected", "fused", "detected_reset"}
+        direct_statuses = {"anchored", "detected", "fused", "detected_reset"}
         if (
             calibration_status not in direct_statuses
             or self.previous_homography is None
@@ -228,6 +247,21 @@ class BallSpeedEstimator:
             if float(np.mean(aligned)) < self.minimum_direction_consistency:
                 return None
         return speed_mps * 3.6
+
+    def _pending_reason(self, track: dict[str, Any]) -> str:
+        if (
+            float(track.get("confidence", 0.0)) < self.minimum_candidate_confidence
+            or float(track.get("track_confidence", 0.0)) < self.minimum_track_confidence
+        ):
+            return BallSpeedReason.LOW_BALL_CONFIDENCE.value
+        if len(self.history) < self.minimum_samples:
+            return BallSpeedReason.INSUFFICIENT_SAMPLES.value
+        samples = list(self.history)
+        if samples[-1].timestamp - samples[0].timestamp < self.minimum_span_seconds:
+            return BallSpeedReason.INSUFFICIENT_SAMPLES.value
+        if median(sample.candidate_confidence for sample in samples) < self.minimum_candidate_confidence:
+            return BallSpeedReason.LOW_BALL_CONFIDENCE.value
+        return BallSpeedReason.TRAJECTORY_UNOBSERVABLE.value
 
     def _clear_history(self) -> None:
         self.history.clear()

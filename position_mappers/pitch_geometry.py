@@ -88,3 +88,69 @@ class PitchGeometry:
     ) -> tuple[float, float]:
         x, y = point
         return x / self.length_m * (width_px - 1), y / self.width_m * (height_px - 1)
+
+    def distance_to_marking(self, point: tuple[float, float]) -> float:
+        """Return metric distance to the nearest known pitch marking or fixed spot."""
+        x, y = map(float, point)
+        length = self.length_m
+        width = self.width_m
+        penalty_top = (width - self.penalty_area_width_m) / 2
+        penalty_bottom = (width + self.penalty_area_width_m) / 2
+        goal_top = (width - self.goal_area_width_m) / 2
+        goal_bottom = (width + self.goal_area_width_m) / 2
+        distances = [
+            abs(x),
+            abs(x - length),
+            abs(y),
+            abs(y - width),
+            abs(x - length / 2),
+            abs(np.hypot(x - length / 2, y - width / 2) - self.centre_circle_radius_m),
+            np.hypot(x - self.penalty_spot_distance_m, y - width / 2),
+            np.hypot(x - (length - self.penalty_spot_distance_m), y - width / 2),
+        ]
+        if penalty_top <= y <= penalty_bottom:
+            distances.extend(
+                [
+                    abs(x - self.penalty_area_depth_m),
+                    abs(x - (length - self.penalty_area_depth_m)),
+                ]
+            )
+        if goal_top <= y <= goal_bottom:
+            distances.extend(
+                [
+                    abs(x - self.goal_area_depth_m),
+                    abs(x - (length - self.goal_area_depth_m)),
+                ]
+            )
+        if 0 <= x <= self.penalty_area_depth_m or length - self.penalty_area_depth_m <= x <= length:
+            distances.extend([abs(y - penalty_top), abs(y - penalty_bottom)])
+        if 0 <= x <= self.goal_area_depth_m or length - self.goal_area_depth_m <= x <= length:
+            distances.extend([abs(y - goal_top), abs(y - goal_bottom)])
+        return float(min(distances))
+
+    def marking_sample_points(self, samples_per_line: int = 40) -> np.ndarray:
+        """Sample regulation pitch markings for image-space alignment checks."""
+        x_values = np.linspace(0.0, self.length_m, samples_per_line)
+        y_values = np.linspace(0.0, self.width_m, samples_per_line)
+        points = [
+            np.column_stack([x_values, np.zeros_like(x_values)]),
+            np.column_stack([x_values, np.full_like(x_values, self.width_m)]),
+            np.column_stack([np.zeros_like(y_values), y_values]),
+            np.column_stack([np.full_like(y_values, self.length_m), y_values]),
+            np.column_stack([np.full_like(y_values, self.length_m / 2), y_values]),
+        ]
+        angles = np.linspace(0.0, 2.0 * np.pi, samples_per_line, endpoint=False)
+        points.append(
+            np.column_stack(
+                [
+                    self.length_m / 2 + self.centre_circle_radius_m * np.cos(angles),
+                    self.width_m / 2 + self.centre_circle_radius_m * np.sin(angles),
+                ]
+            )
+        )
+        penalty_top = (self.width_m - self.penalty_area_width_m) / 2
+        penalty_bottom = (self.width_m + self.penalty_area_width_m) / 2
+        for x in (self.penalty_area_depth_m, self.length_m - self.penalty_area_depth_m):
+            penalty_y = np.linspace(penalty_top, penalty_bottom, samples_per_line)
+            points.append(np.column_stack([np.full_like(penalty_y, x), penalty_y]))
+        return np.concatenate(points, axis=0).astype(np.float32)

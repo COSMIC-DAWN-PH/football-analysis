@@ -13,6 +13,8 @@ from tracking.ball_tracker import (
     BallDetector,
     BallTracker,
     ConstantVelocityKalman,
+    validate_ball_model_for_promotion,
+    validate_ball_verifier_for_promotion,
     non_max_suppression,
     offset_bbox,
     overlapping_tiles,
@@ -58,6 +60,43 @@ class BallDetectionUtilitiesTests(unittest.TestCase):
                 encoding="utf-8",
             )
             self.assertIsNone(BallDetector._fixed_export_size(model_dir))
+
+    def test_static_small_openvino_export_is_blocked_from_promotion(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            model_dir = Path(temporary)
+            (model_dir / "metadata.yaml").write_text(
+                yaml.safe_dump(
+                    {
+                        "description": "Ultralytics YOLO11n model trained for balls",
+                        "imgsz": [640, 640],
+                        "args": {"dynamic": False},
+                        "names": {0: "ball"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            errors = validate_ball_model_for_promotion(model_dir)
+        self.assertTrue(any("dynamic=True" in error for error in errors))
+        self.assertTrue(any("at least 1280" in error for error in errors))
+        self.assertTrue(any("YOLO11s" in error for error in errors))
+
+    def test_checkpoint_without_export_metadata_is_not_formally_promoted(self) -> None:
+        errors = validate_ball_model_for_promotion("ball-detection.pt")
+        self.assertTrue(any("metadata.yaml" in error for error in errors))
+
+    def test_verifier_promotion_requires_validated_threshold_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            verifier_path = Path(temporary) / "verifier.pt"
+            errors = validate_ball_verifier_for_promotion(verifier_path)
+            self.assertTrue(any("sidecar is missing" in error for error in errors))
+            verifier_path.with_suffix(".verifier.json").write_text(
+                '{"decision_threshold": 0.62, "precision": 0.97, "recall": 0.76}',
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_ball_verifier_for_promotion(verifier_path),
+                [],
+            )
 
 
 class BallTrackerTests(unittest.TestCase):
@@ -167,6 +206,22 @@ class BallTrackerTests(unittest.TestCase):
         self.assertTrue(latest[1]["track_confirmed"])
         self.assertEqual(latest[1]["track_segment"], 1)
 
+    def test_fixed_lag_requires_temporal_evidence_before_confirmation(self) -> None:
+        tracker = BallTracker(self.geometry, fixed_lag_seconds=0.20)
+        players = {"player": {}, "goalkeeper": {}}
+        latest = None
+        for frame in range(7):
+            latest = tracker.update(
+                [BallCandidate((8 + frame * 0.1, 8, 12 + frame * 0.1, 12), 0.8)],
+                frame / 30.0,
+                self.calibration,
+                players,
+                (1080, 1920, 3),
+            )
+            if frame < 6:
+                self.assertFalse(latest[1]["track_confirmed"])
+        self.assertTrue(latest[1]["track_confirmed"])
+
     def test_observation_after_long_gap_starts_new_segment(self) -> None:
         tracker = BallTracker(self.geometry)
         players = {"player": {}, "goalkeeper": {}}
@@ -208,6 +263,90 @@ class BallTrackerTests(unittest.TestCase):
             (1080, 1920, 3),
         )
         self.assertNotEqual(first[1]["track_segment"], jumped[1]["track_segment"])
+
+    def test_low_confidence_pitch_marking_never_confirms(self) -> None:
+        tracker = BallTracker(self.geometry)
+        players = {"player": {}, "goalkeeper": {}}
+        latest = None
+        for frame in range(10):
+            latest = tracker.update(
+                [
+                    BallCandidate(
+                        (50.5, 32.0, 54.5, 36.0),
+                        0.20,
+                        line_score=1.0,
+                    )
+                ],
+                frame / 30.0,
+                self.calibration,
+                players,
+                (1080, 1920, 3),
+            )
+        self.assertIsNotNone(latest)
+        self.assertFalse(latest[1]["track_confirmed"])
+        self.assertIn("pitch_marking_overlap", latest[1]["rejection_reasons"])
+
+    def test_strong_ball_on_pitch_marking_can_confirm(self) -> None:
+        tracker = BallTracker(self.geometry)
+        players = {"player": {}, "goalkeeper": {}}
+        latest = None
+        for frame in range(4):
+            latest = tracker.update(
+                [
+                    BallCandidate(
+                        (50.5, 32.0, 54.5, 36.0),
+                        0.85,
+                        appearance_score=0.95,
+                        line_score=1.0,
+                        verifier_score=0.95,
+                        verifier_threshold=0.60,
+                    )
+                ],
+                frame / 30.0,
+                self.calibration,
+                players,
+                (1080, 1920, 3),
+            )
+        self.assertIsNotNone(latest)
+        self.assertTrue(latest[1]["track_confirmed"])
+
+    def test_verifier_rejection_blocks_confirmation(self) -> None:
+        tracker = BallTracker(self.geometry)
+        latest = None
+        for frame in range(6):
+            latest = tracker.update(
+                [
+                    BallCandidate(
+                        (18, 18, 22, 22),
+                        0.95,
+                        appearance_score=0.10,
+                        verifier_score=0.10,
+                        verifier_threshold=0.60,
+                    )
+                ],
+                frame / 30.0,
+                self.calibration,
+                {"player": {}, "goalkeeper": {}},
+                (1080, 1920, 3),
+            )
+        self.assertFalse(latest[1]["track_confirmed"])
+        self.assertIn("appearance_rejected", latest[1]["rejection_reasons"])
+
+    def test_close_candidate_scores_remain_ambiguous(self) -> None:
+        tracker = BallTracker(self.geometry, ambiguity_margin=0.10)
+        result = tracker.update(
+            [
+                BallCandidate((8, 8, 12, 12), 0.80),
+                BallCandidate((13, 8, 17, 12), 0.79),
+            ],
+            0.0,
+            self.calibration,
+            {"player": {}, "goalkeeper": {}},
+            (1080, 1920, 3),
+        )
+        self.assertEqual(result[1]["track_state"], "ambiguous")
+        self.assertFalse(result[1]["track_confirmed"])
+        self.assertEqual(result[1]["hypothesis_count"], 2)
 
 
 class MetricPossessionTests(unittest.TestCase):

@@ -16,7 +16,8 @@ class TracksJsonWriter(AbstractWriter):
 
     def __init__(self, save_dir: str = '', object_fname: str = 'object_tracks', 
                  keypoints_fname: str = 'keypoint_tracks',
-                 calibration_fname: str = 'calibration_tracks') -> None:
+                 calibration_fname: str = 'calibration_tracks',
+                 diagnostics_fname: str = 'diagnostics') -> None:
         """
         Initializes the TracksJsonWriter.
 
@@ -30,10 +31,18 @@ class TracksJsonWriter(AbstractWriter):
         self.obj_path = os.path.join(self.save_dir, f'{object_fname}.jsonl')
         self.kp_path = os.path.join(self.save_dir, f'{keypoints_fname}.jsonl')
         self.calibration_path = os.path.join(self.save_dir, f'{calibration_fname}.jsonl')
+        self.diagnostics_path = os.path.join(self.save_dir, f'{diagnostics_fname}.jsonl')
+        self.summary_path = os.path.join(self.save_dir, 'quality_summary.json')
 
         if os.path.exists(save_dir):
             self._remove_existing_files(
-                files=[self.kp_path, self.obj_path, self.calibration_path]
+                files=[
+                    self.kp_path,
+                    self.obj_path,
+                    self.calibration_path,
+                    self.diagnostics_path,
+                    self.summary_path,
+                ]
             )
         else:
             os.makedirs(save_dir)
@@ -48,6 +57,22 @@ class TracksJsonWriter(AbstractWriter):
 
     def get_calibration_tracks_path(self) -> str:
         return self.calibration_path
+
+    def get_diagnostics_path(self) -> str:
+        return self.diagnostics_path
+
+    def get_summary_path(self) -> str:
+        return self.summary_path
+
+    def write_summary(self, summary: dict[str, Any]) -> None:
+        with open(self.summary_path, 'w', encoding='utf-8', newline='\n') as handle:
+            json.dump(
+                self._make_serializable(summary),
+                handle,
+                ensure_ascii=False,
+                indent=2,
+            )
+            handle.write('\n')
 
     def write(self, filename: str, tracks: Any) -> None:
         """Write tracks to a JSON file.

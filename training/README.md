@@ -9,6 +9,21 @@ python -m training.prepare_dataset extract --task ball --videos video1.mp4 video
 python -m training.prepare_dataset extract --task pitch --videos video1.mp4 video2.mp4 --output-dir training-data/pitch --model models/weights/keypoints-detection.pt
 ```
 
+Mine the false detections found by an end-to-end run. Every exported frame is
+marked for manual review; do not treat it as an automatic negative until the
+real ball has been ruled out:
+
+```powershell
+python -m training.prepare_dataset mine-hard-negatives --video video1.mp4 --object-tracks output_videos/match/raw/object_tracks.jsonl --output-dir training-data/hard-negatives
+```
+
+Include pitch lines and intersections, penalty spots, white socks and boots,
+reflections, litter, distant people, and empty scenes. Build the second-stage
+classifier with `train/val/test` folders, each containing `ball` and `non_ball`.
+The verifier trainer selects its decision threshold on `val` by maximizing
+precision subject to recall >=75%, reports the held-out `test` result, and writes
+the threshold beside the checkpoint/export for runtime use.
+
 Correct every prelabel in a YOLO-compatible annotation tool. For pitch data, add this exact permutation to `data.yaml` so horizontal augmentation preserves landmark identities:
 
 When creating the final splits, keep/update `manifest.csv` with `split` and `pitch` columns. The validator uses `source_video` and `pitch` to reject cross-split leakage and verifies that test includes an unseen pitch.
@@ -35,7 +50,15 @@ Run on a CUDA cloud machine from the repository root:
 
 ```bash
 python -m training.train_models --task ball --data training-data/ball-yolo/data.yaml --device 0
+python -m training.train_models --task ball-verifier --data training-data/ball-verifier --device 0
 python -m training.train_models --task pitch --data training-data/pitch-yolo/data.yaml --device 0 --batch 4
 ```
 
-The script writes held-out metrics and a dynamic-shape OpenVINO FP16 export, allowing 1920 whole-frame and 1280 tile inference, but deliberately does not replace runtime weights. Promote a ball model only after it reaches at least 75% visible-ball recall and 90% precision on unseen-pitch videos, then rerun the end-to-end calibration and speed checks.
+The script writes held-out metrics and a dynamic-shape OpenVINO FP16 export, allowing 1920 whole-frame and 1280 tile inference, but deliberately does not replace runtime weights. Promote a ball model only after it reaches at least 75% visible-ball recall and 95% precision on unseen-pitch videos, passes the dynamic-1280 YOLO11s metadata gate, and passes the end-to-end false-track evaluation. The keypoint export must also be dynamic 1280 with exactly 32 landmarks.
+
+Run the golden-video evaluation before copying any weights into the runtime
+location:
+
+```powershell
+python -m evaluation --tracks-dir output_videos/match/raw --ground-truth validation/match-ground-truth.jsonl --fps 30 --output output_videos/match/evaluation.json
+```

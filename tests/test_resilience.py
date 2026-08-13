@@ -76,7 +76,7 @@ class ResilienceTests(unittest.TestCase):
         labels = [call.args[1] for call in put_text.call_args_list]
         self.assertIn("Ball 36.0 km/h", labels)
 
-    def test_pending_ball_speed_label_is_drawn(self) -> None:
+    def test_unreliable_ball_speed_is_hidden_by_default(self) -> None:
         annotator = ObjectAnnotator()
         frame = np.zeros((240, 320, 3), dtype=np.uint8)
         tracks = {
@@ -88,7 +88,27 @@ class ResilienceTests(unittest.TestCase):
         with patch("annotation.object_annotator.cv2.putText") as put_text:
             annotator.annotate(frame, tracks)
         labels = [call.args[1] for call in put_text.call_args_list]
-        self.assertIn("Ball speed: pending", labels)
+        self.assertEqual(labels, [])
+
+    def test_diagnostic_ball_speed_reason_is_opt_in(self) -> None:
+        annotator = ObjectAnnotator(debug_diagnostics=True)
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        tracks = {
+            "ball": {
+                1: {
+                    "bbox": [100, 100, 108, 108],
+                    "speed_state": "unavailable",
+                    "speed_reason": "pose_invalid",
+                }
+            },
+            "goalkeeper": {},
+            "player": {},
+            "referee": {},
+        }
+        with patch("annotation.object_annotator.cv2.putText") as put_text:
+            annotator.annotate(frame, tracks)
+        labels = [call.args[1] for call in put_text.call_args_list]
+        self.assertIn("Ball unavailable: pose_invalid", labels)
 
     def test_unconfirmed_possession_is_explicitly_labeled(self) -> None:
         processor = FootballVideoProcessor.__new__(FootballVideoProcessor)

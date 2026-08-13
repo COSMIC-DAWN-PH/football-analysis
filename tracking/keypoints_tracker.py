@@ -1,12 +1,39 @@
 from __future__ import annotations
 
 from typing import List, Optional
+from pathlib import Path
 
 import numpy as np
 import supervision as sv
+import yaml
 from ultralytics.engine.results import Results
 
 from tracking.abstract_tracker import AbstractTracker
+
+
+def validate_keypoint_model_for_promotion(
+    path: str | Path, *, minimum_imgsz: int = 1280
+) -> list[str]:
+    """Return deployment-policy failures for the 32-landmark pose model."""
+    model_path = Path(path)
+    metadata_path = model_path / "metadata.yaml" if model_path.is_dir() else None
+    if metadata_path is None or not metadata_path.is_file():
+        return [
+            "formal keypoint promotion requires an exported model directory with metadata.yaml"
+        ]
+    metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}
+    errors = []
+    if not bool((metadata.get("args") or {}).get("dynamic")):
+        errors.append("keypoint model export must use dynamic=True")
+    image_size = metadata.get("imgsz")
+    if isinstance(image_size, (list, tuple)):
+        image_size = max(int(value) for value in image_size)
+    if image_size is not None and int(image_size) < minimum_imgsz:
+        errors.append(f"keypoint model export imgsz must be at least {minimum_imgsz}")
+    shape = metadata.get("kpt_shape")
+    if not shape or int(shape[0]) != 32:
+        errors.append(f"keypoint model must expose 32 landmarks, found {shape}")
+    return errors
 
 
 class KeypointsTracker(AbstractTracker):

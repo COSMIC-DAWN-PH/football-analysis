@@ -9,7 +9,8 @@ class ObjectAnnotator(AbstractAnnotator):
     """Annotates objects in a frame, such as the ball, players, referees, and goalkeepers."""
 
     def __init__(self, ball_annotation_color: Tuple[int, int, int] = (48, 48, 190), 
-                 referee_annotation_color: Tuple[int, int, int] = (40, 40, 40)) -> None:
+                 referee_annotation_color: Tuple[int, int, int] = (40, 40, 40),
+                 debug_diagnostics: bool = False) -> None:
         """
         Initializes the ObjectAnnotator with predefined ball and referee annotation colors.
 
@@ -19,6 +20,7 @@ class ObjectAnnotator(AbstractAnnotator):
         """
         self.ball_annotation_color = ball_annotation_color
         self.referee_annotation_color = referee_annotation_color
+        self.debug_diagnostics = debug_diagnostics
         super().__init__()
         
     
@@ -47,11 +49,15 @@ class ObjectAnnotator(AbstractAnnotator):
                 # Annotate based on object type
                 if track == 'ball':
                     frame = self.draw_triangle(frame, item['bbox'], self.ball_annotation_color)
-                    speed_status = item.get('speed_status')
-                    if speed_status == 'reliable' and 'speed' in item:
+                    speed_state = item.get('speed_state', item.get('speed_status'))
+                    if speed_state == 'reliable' and 'speed' in item:
                         frame = self.draw_ball_speed(frame, item['bbox'], item['speed'])
-                    elif speed_status == 'pending':
-                        frame = self.draw_ball_speed(frame, item['bbox'], None)
+                    elif self.debug_diagnostics:
+                        frame = self.draw_ball_status(
+                            frame,
+                            item['bbox'],
+                            str(item.get('speed_reason', speed_state or 'unavailable')),
+                        )
                 elif track == 'referee':
                     frame = self.draw_ellipse(frame, item['bbox'], self.referee_annotation_color, track_id, -1, track)
                 else:
@@ -76,7 +82,7 @@ class ObjectAnnotator(AbstractAnnotator):
         x, _ = get_bbox_center(bbox)
         x = int(x) + 12
         y = max(22, int(bbox[1]) - 10)
-        label = "Ball speed: pending" if speed is None else f"Ball {speed:.1f} km/h"
+        label = "Ball speed unavailable" if speed is None else f"Ball {speed:.1f} km/h"
         cv2.putText(
             frame,
             label,
@@ -93,6 +99,39 @@ class ObjectAnnotator(AbstractAnnotator):
             (x, y),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.55,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+        return frame
+
+    def draw_ball_status(
+        self,
+        frame: np.ndarray,
+        bbox: Tuple[int, int, int, int],
+        reason: str,
+    ) -> np.ndarray:
+        """Draw a machine-readable reason only in explicit diagnostic mode."""
+        x, _ = get_bbox_center(bbox)
+        x = int(x) + 12
+        y = max(22, int(bbox[1]) - 10)
+        label = f"Ball unavailable: {reason}"
+        cv2.putText(
+            frame,
+            label,
+            (x, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            (0, 0, 0),
+            3,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            frame,
+            label,
+            (x, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
             (255, 255, 255),
             1,
             cv2.LINE_AA,
