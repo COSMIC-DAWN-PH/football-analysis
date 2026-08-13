@@ -12,34 +12,36 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
+from position_mappers import PitchGeometry
 
-PITCH_W = 527.0
-PITCH_H = 351.0
-PITCH_LENGTH_M = 100.0
-PITCH_WIDTH_M = 50.0
-TOP_DOWN_KEYPOINTS = np.array(
-    [
-        [0, 0], [0, 57], [0, 122], [0, 229], [0, 293], [0, 351],
-        [32, 122], [32, 229], [64, 176],
-        [96, 57], [96, 122], [96, 229], [96, 293],
-        [263, 0], [263, 122], [263, 229], [263, 351],
-        [431, 57], [431, 122], [431, 229], [431, 293],
-        [463, 176], [495, 122], [495, 229],
-        [527, 0], [527, 57], [527, 122], [527, 229], [527, 293], [527, 351],
-        [210, 176], [317, 176],
-    ],
-    dtype=np.float32,
-)
+
 TEAM_COLORS = {"Red": "#d82f45", "Blue": "#2764c7"}
 
 
-def parse_args() -> argparse.Namespace:
+def default_summary_dir(tracks_dir: Path) -> Path:
+    """Place summaries beside a conventional raw track directory."""
+    if tracks_dir.name.casefold() == "raw":
+        return tracks_dir.parent / "summary"
+    return tracks_dir / "summary"
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tracks-dir", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Summary directory; defaults to a summary folder beside raw tracks",
+    )
     parser.add_argument("--fps", type=float, default=1.0)
     parser.add_argument("--source", type=Path, required=True)
-    return parser.parse_args()
+    parser.add_argument("--pitch-length-m", type=float, required=True)
+    parser.add_argument("--pitch-width-m", type=float, required=True)
+    args = parser.parse_args(argv)
+    if args.output_dir is None:
+        args.output_dir = default_summary_dir(args.tracks_dir)
+    return args
 
 
 def read_jsonl(path: Path) -> list[dict]:
@@ -47,12 +49,14 @@ def read_jsonl(path: Path) -> list[dict]:
         return [json.loads(line) for line in handle if line.strip()]
 
 
-def frame_homography(keypoints: dict) -> tuple[np.ndarray | None, dict]:
+def frame_homography(
+    keypoints: dict, geometry: PitchGeometry
+) -> tuple[np.ndarray | None, dict]:
     pairs = []
     for raw_idx, raw_xy in keypoints.items():
         idx = int(raw_idx)
-        if 0 <= idx < len(TOP_DOWN_KEYPOINTS):
-            pairs.append((np.asarray(raw_xy, dtype=np.float32), TOP_DOWN_KEYPOINTS[idx]))
+        if 0 <= idx < len(geometry.vertices):
+            pairs.append((np.asarray(raw_xy, dtype=np.float32), geometry.vertices[idx]))
 
     quality = {
         "keypoints": len(pairs),
@@ -62,18 +66,18 @@ def frame_homography(keypoints: dict) -> tuple[np.ndarray | None, dict]:
         "pitch_span_x": 0.0,
         "pitch_span_y": 0.0,
     }
-    if len(pairs) < 8:
+    if len(pairs) < 6:
         return None, quality
 
     src = np.asarray([pair[0] for pair in pairs], dtype=np.float32)
     dst = np.asarray([pair[1] for pair in pairs], dtype=np.float32)
-    homography, mask = cv2.findHomography(src, dst, cv2.RANSAC, 7.0)
-    if homography is None or mask is None:
+    world_to_image, mask = cv2.findHomography(dst, src, cv2.RANSAC, 5.0)
+    if world_to_image is None or mask is None:
         return None, quality
 
     mask = mask.ravel().astype(bool)
-    projected = cv2.perspectiveTransform(src.reshape(-1, 1, 2), homography).reshape(-1, 2)
-    errors = np.linalg.norm(projected - dst, axis=1)
+    projected = cv2.perspectiveTransform(dst.reshape(-1, 1, 2), world_to_image).reshape(-1, 2)
+    errors = np.linalg.norm(projected - src, axis=1)
     inliers = int(mask.sum())
     median_error = float(np.median(errors[mask])) if inliers else float("inf")
     inlier_ratio = inliers / len(pairs)
@@ -87,58 +91,100 @@ def frame_homography(keypoints: dict) -> tuple[np.ndarray | None, dict]:
         pitch_span_y=pitch_span_y,
     )
 
-    # The pose model often emits a few mutually inconsistent field landmarks.
-    # RANSAC still produces a stable map when at least 40% agree and those
-    # inliers span both pitch axes. Requiring 60% discarded many visibly good
-    # wide-angle frames.
+    # Match the online calibrator's acceptance gates so legacy JSONL files do
+    # not silently admit lower-quality projections than current runs.
     if (
-        inliers < 6
-        or inlier_ratio < 0.40
-        or median_error > 4.0
-        or pitch_span_x < 150.0
-        or pitch_span_y < 100.0
+        inliers < 5
+        or inlier_ratio < 0.60
+        or median_error > 5.0
+        or pitch_span_x / geometry.length_m < 0.30
+        or pitch_span_y / geometry.width_m < 0.25
     ):
         return None, quality
-    return homography, quality
+    try:
+        return np.linalg.inv(world_to_image), quality
+    except np.linalg.LinAlgError:
+        return None, quality
 
 
-def project_players(objects: dict, homography: np.ndarray) -> dict[str, list[tuple[float, float]]]:
+def project_players(
+    objects: dict,
+    homography: np.ndarray | None,
+    geometry: PitchGeometry,
+) -> dict[str, list[tuple[float, float]]]:
     result: dict[str, list[tuple[float, float]]] = {"Red": [], "Blue": []}
     for object_type in ("player", "goalkeeper"):
         for item in objects.get(object_type, {}).values():
             team = item.get("club")
             if team not in result:
                 continue
-            x1, _y1, x2, y2 = item["bbox"]
-            foot = np.array([[[0.5 * (x1 + x2), y2]]], dtype=np.float32)
-            x, y = cv2.perspectiveTransform(foot, homography).reshape(2)
-            if 0 <= x <= PITCH_W and 0 <= y <= PITCH_H:
-                result[team].append((float(x / PITCH_W * PITCH_LENGTH_M),
-                                     float(y / PITCH_H * PITCH_WIDTH_M)))
+            position = item.get("position_m")
+            if position is None and homography is not None:
+                x1, _y1, x2, y2 = item["bbox"]
+                foot = np.array([[[0.5 * (x1 + x2), y2]]], dtype=np.float32)
+                position = cv2.perspectiveTransform(foot, homography).reshape(2)
+            if position is not None and geometry.contains(tuple(position), margin_m=0.0):
+                result[team].append((float(position[0]), float(position[1])))
     return result
 
 
-def draw_pitch(axis: plt.Axes) -> None:
+def draw_pitch(axis: plt.Axes, geometry: PitchGeometry) -> None:
     axis.set_facecolor("#1f6b45")
     line = "#e8f0e8"
-    axis.plot([0, 100, 100, 0, 0], [0, 0, 50, 50, 0], color=line, lw=1.2)
-    axis.plot([50, 50], [0, 50], color=line, lw=1.0)
-    axis.add_patch(plt.Circle((50, 25), 9.15, fill=False, color=line, lw=1.0))
-    for x, sign in ((0, 1), (100, -1)):
-        axis.add_patch(plt.Rectangle((x, 10), sign * 16.5, 30, fill=False, color=line, lw=1.0))
-        axis.add_patch(plt.Rectangle((x, 18), sign * 5.5, 14, fill=False, color=line, lw=1.0))
-    axis.set_xlim(0, 100)
-    axis.set_ylim(50, 0)
+    length, width = geometry.length_m, geometry.width_m
+    axis.plot([0, length, length, 0, 0], [0, 0, width, width, 0], color=line, lw=1.2)
+    axis.plot([length / 2, length / 2], [0, width], color=line, lw=1.0)
+    axis.add_patch(
+        plt.Circle(
+            (length / 2, width / 2),
+            geometry.centre_circle_radius_m,
+            fill=False,
+            color=line,
+            lw=1.0,
+        )
+    )
+    penalty_y = (width - geometry.penalty_area_width_m) / 2
+    goal_y = (width - geometry.goal_area_width_m) / 2
+    for x, sign in ((0, 1), (length, -1)):
+        axis.add_patch(
+            plt.Rectangle(
+                (x, penalty_y),
+                sign * geometry.penalty_area_depth_m,
+                geometry.penalty_area_width_m,
+                fill=False,
+                color=line,
+                lw=1.0,
+            )
+        )
+        axis.add_patch(
+            plt.Rectangle(
+                (x, goal_y),
+                sign * geometry.goal_area_depth_m,
+                geometry.goal_area_width_m,
+                fill=False,
+                color=line,
+                lw=1.0,
+            )
+        )
+    axis.set_xlim(0, length)
+    axis.set_ylim(width, 0)
     axis.set_aspect("equal")
     axis.set_xlabel("Fixed pitch x (m)")
     axis.set_ylabel("Fixed pitch y (m)")
 
 
-def smooth_histogram(points: list[tuple[float, float]]) -> np.ndarray:
+def smooth_histogram(
+    points: list[tuple[float, float]], geometry: PitchGeometry
+) -> np.ndarray:
     if not points:
-        return np.zeros((50, 100), dtype=np.float32)
+        return np.zeros((68, 105), dtype=np.float32)
     values = np.asarray(points)
-    histogram, _, _ = np.histogram2d(values[:, 1], values[:, 0], bins=(50, 100), range=((0, 50), (0, 100)))
+    histogram, _, _ = np.histogram2d(
+        values[:, 1],
+        values[:, 0],
+        bins=(68, 105),
+        range=((0, geometry.width_m), (0, geometry.length_m)),
+    )
     return cv2.GaussianBlur(histogram.astype(np.float32), (0, 0), sigmaX=3, sigmaY=3)
 
 
@@ -176,22 +222,60 @@ def fmt(value: float | None, suffix: str = "") -> str:
 
 def main() -> None:
     args = parse_args()
+    geometry = PitchGeometry(args.pitch_length_m, args.pitch_width_m)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     objects = read_jsonl(args.tracks_dir / "object_tracks.jsonl")
     keypoints = read_jsonl(args.tracks_dir / "keypoint_tracks.jsonl")
     frame_count = min(len(objects), len(keypoints))
+    calibration_path = args.tracks_dir / "calibration_tracks.jsonl"
+    calibrations = read_jsonl(calibration_path) if calibration_path.is_file() else []
+    if calibrations:
+        frame_count = min(frame_count, len(calibrations))
 
     all_points: dict[str, list[tuple[float, float]]] = {"Red": [], "Blue": []}
     frame_rows: list[dict] = []
     quality_rows: list[dict] = []
 
-    for frame_idx, (frame_objects, frame_keypoints) in enumerate(zip(objects, keypoints)):
-        homography, quality = frame_homography(frame_keypoints)
-        quality_rows.append({"frame": frame_idx, **quality, "accepted": homography is not None})
-        if homography is None:
+    for frame_idx in range(frame_count):
+        frame_objects = objects[frame_idx]
+        frame_keypoints = keypoints[frame_idx]
+        calibration = calibrations[frame_idx] if calibrations else None
+        has_metric_positions = any(
+            "position_m" in item
+            for object_type in ("player", "goalkeeper")
+            for item in frame_objects.get(object_type, {}).values()
+        )
+        if calibration is not None:
+            calibration_quality = calibration.get("quality")
+            accepted_frame = calibration.get("image_to_pitch") is not None and (
+                calibration_quality is None or float(calibration_quality) > 0.0
+            )
+            quality = {
+                "keypoints": calibration.get("keypoints", 0),
+                "inliers": calibration.get("inliers", 0),
+                "inlier_ratio": calibration.get("inlier_ratio", 0.0),
+                "median_error": calibration.get("median_error_px"),
+                "pitch_span_x": calibration.get("span_length_ratio", 0.0) * geometry.length_m,
+                "pitch_span_y": calibration.get("span_width_ratio", 0.0) * geometry.width_m,
+                "status": calibration.get("status"),
+                "quality": calibration_quality,
+                "age_seconds": calibration.get("age_seconds"),
+                "flow_quality": calibration.get("flow_quality"),
+            }
+            homography = None
+        else:
+            homography, quality = frame_homography(frame_keypoints, geometry)
+            accepted_frame = homography is not None
+        quality_rows.append({"frame": frame_idx, **quality, "accepted": accepted_frame})
+        if not accepted_frame or (not has_metric_positions and homography is None):
             continue
-        projected = project_players(frame_objects, homography)
-        row = {"frame": frame_idx, "second": frame_idx / args.fps}
+        projected = project_players(frame_objects, homography, geometry)
+        timestamp = (
+            float(calibration.get("timestamp_seconds", frame_idx / args.fps))
+            if calibration is not None
+            else frame_idx / args.fps
+        )
+        row = {"frame": frame_idx, "second": timestamp}
         usable = False
         for team in ("Red", "Blue"):
             all_points[team].extend(projected[team])
@@ -208,6 +292,11 @@ def main() -> None:
     usable_both = sum(
         "red_centroid_x" in row and "blue_centroid_x" in row for row in frame_rows
     )
+    accepted_quality = [
+        float(row["quality"])
+        for row in quality_rows
+        if row["accepted"] and row.get("quality") is not None
+    ]
 
     team_summary = {}
     for team in ("Red", "Blue"):
@@ -217,12 +306,12 @@ def main() -> None:
         thirds_x = [0.0, 0.0, 0.0]
         lanes_y = [0.0, 0.0, 0.0]
         if len(points):
-            thirds_x = [float(np.mean(points[:, 0] < 100 / 3)),
-                        float(np.mean((points[:, 0] >= 100 / 3) & (points[:, 0] < 200 / 3))),
-                        float(np.mean(points[:, 0] >= 200 / 3))]
-            lanes_y = [float(np.mean(points[:, 1] < 50 / 3)),
-                       float(np.mean((points[:, 1] >= 50 / 3) & (points[:, 1] < 100 / 3))),
-                       float(np.mean(points[:, 1] >= 100 / 3))]
+            thirds_x = [float(np.mean(points[:, 0] < geometry.length_m / 3)),
+                        float(np.mean((points[:, 0] >= geometry.length_m / 3) & (points[:, 0] < 2 * geometry.length_m / 3))),
+                        float(np.mean(points[:, 0] >= 2 * geometry.length_m / 3))]
+            lanes_y = [float(np.mean(points[:, 1] < geometry.width_m / 3)),
+                       float(np.mean((points[:, 1] >= geometry.width_m / 3) & (points[:, 1] < 2 * geometry.width_m / 3))),
+                       float(np.mean(points[:, 1] >= 2 * geometry.width_m / 3))]
         team_summary[team] = {
             "frames": len(team_rows),
             "shape_frames": sum(f"{prefix}_length" in row for row in team_rows),
@@ -237,12 +326,21 @@ def main() -> None:
             "y_lanes": lanes_y,
         }
 
+    duration_seconds = (
+        max(
+            (float(item.get("timestamp_seconds", 0.0)) for item in calibrations[:frame_count]),
+            default=0.0,
+        )
+        if calibrations
+        else frame_count / args.fps
+    )
+
     # Minute-level robust aggregates.
     minute_buckets: dict[int, list[dict]] = defaultdict(list)
     for row in frame_rows:
         minute_buckets[int(row["second"] // 60)].append(row)
     minute_rows = []
-    for minute in range(int(np.ceil(frame_count / args.fps / 60))):
+    for minute in range(max(1, int(np.ceil(duration_seconds / 60)))):
         rows = minute_buckets.get(minute, [])
         output = {
             "minute": minute,
@@ -268,9 +366,15 @@ def main() -> None:
     # Team heatmaps.
     fig, axes = plt.subplots(2, 1, figsize=(12, 8), constrained_layout=True)
     for axis, team in zip(axes, ("Red", "Blue")):
-        heat = smooth_histogram(all_points[team])
-        draw_pitch(axis)
-        axis.imshow(heat, extent=(0, 100, 50, 0), cmap="magma", alpha=0.72, aspect="auto")
+        heat = smooth_histogram(all_points[team], geometry)
+        draw_pitch(axis, geometry)
+        axis.imshow(
+            heat,
+            extent=(0, geometry.length_m, geometry.width_m, 0),
+            cmap="magma",
+            alpha=0.72,
+            aspect="auto",
+        )
         axis.set_title(f"{team} team spatial density ({len(all_points[team]):,} accepted positions)")
     fig.savefig(args.output_dir / "team_heatmaps.png", dpi=180)
     plt.close(fig)
@@ -281,7 +385,7 @@ def main() -> None:
     for team in ("Red", "Blue"):
         values = [row[f"{team.lower()}_centroid_x"] for row in minute_rows]
         axis.plot(minutes, values, marker="o", ms=3, lw=1.5, color=TEAM_COLORS[team], label=team)
-    axis.set_ylim(0, 100)
+    axis.set_ylim(0, geometry.length_m)
     axis.set_xlabel("Match minute")
     axis.set_ylabel("Median fixed-pitch x centroid (m)")
     axis.set_title("Team longitudinal centres by minute (not attacking direction)")
@@ -319,9 +423,12 @@ def main() -> None:
         "source": str(args.source),
         "sample_fps": args.fps,
         "frames": frame_count,
-        "duration_seconds": frame_count / args.fps,
+        "duration_seconds": duration_seconds,
+        "pitch_length_m": geometry.length_m,
+        "pitch_width_m": geometry.width_m,
         "accepted_homography_frames": accepted,
         "accepted_homography_rate": accepted / frame_count if frame_count else 0,
+        "median_calibration_quality": median_or_none(accepted_quality),
         "frames_with_both_teams": usable_both,
         "teams": team_summary,
         "most_separated_minutes": stretched,
@@ -336,22 +443,21 @@ def main() -> None:
 
     red = team_summary["Red"]
     blue = team_summary["Blue"]
-    report = f"""# VID_202511091802229380 足球视频战术分析
+    report = f"""# {args.source.name} 足球视频战术分析
 
 ## 结论摘要
 
-- 视频约 {frame_count / args.fps / 60:.1f} 分钟，按每秒 1 帧覆盖完整时间轴，共分析 {frame_count:,} 个时间样本。
-- 其中 {accepted:,} 帧通过场地关键点与单应性质量门槛，占 {accepted / frame_count * 100:.1f}%；{usable_both:,} 帧同时得到两队至少 2 名场内球员的有效重心位置。
+- 视频约 {duration_seconds / 60:.1f} 分钟，共分析 {frame_count:,} 个时间样本。
+- 其中 {accepted:,} 帧通过场地关键点与单应性质量门槛，占 {(accepted / frame_count * 100) if frame_count else 0.0:.1f}%；{usable_both:,} 帧同时得到两队至少 2 名场内球员的有效重心位置。
 - 质量筛选后获得红队 {red['position_samples']:,} 个、蓝队 {blue['position_samples']:,} 个场内位置样本，可用于观察大范围空间偏好；相机跟拍偏差仍然存在。
 - 在至少识别到 3 名同队球员的画面中，红队典型阵型跨度约为纵向 {fmt(red['median_length'], ' m')}、横向 {fmt(red['median_width'], ' m')}（{red['shape_frames']} 帧）；蓝队约为纵向 {fmt(blue['median_length'], ' m')}、横向 {fmt(blue['median_width'], ' m')}（{blue['shape_frames']} 帧）。
 - 两队纵向重心分离最大的分钟：{minute_list(stretched)}；最压缩的分钟：{minute_list(compressed)}。该指标反映固定场地坐标上的队形拉开/靠拢，不代表控球或攻守优劣。
 
 ## 战术解读
 
-1. **两队都明显集中在摄像机对侧通道。** 红队有 {red['y_lanes'][0]*100:.1f}% 的有效位置落在固定场地上侧三分之一区，蓝队为 {blue['y_lanes'][0]*100:.1f}%。人工抽帧也反复看到近侧大面积空置。这既受自动跟拍关注区域影响，也说明比赛多数阶段围绕远侧边路展开。
-2. **红队更窄、更纵向拉长；蓝队略宽、略短。** 有足够同队球员的样本中，红队典型长度比蓝队多约 {red['median_length'] - blue['median_length']:.1f} m，蓝队典型宽度比红队多约 {blue['median_width'] - red['median_width']:.1f} m。可把它理解为红队更偏纵向串联、蓝队横向展开稍多；差异不大且会受镜头漏拍影响。
-3. **值得回看的结构时段。** 07:00、14:00、22:00 附近两队纵向重心分离较大，适合检查阵线是否脱节、前后场接应是否足够；12:00、13:00、20:00 附近更压缩，适合检查小空间出球、二点球保护和弱侧转移。
-4. **共同改进方向。** 当球集中在远侧边路时，弱侧球员应保留宽度并提前形成转移接应点；丢球后则要保证中路保护，不要让“全员向球侧横移”演变成弱侧完全无人。红队尤其可提高近侧通道的利用率，蓝队则可继续利用相对更好的横向宽度制造跨线传递角度。
+1. 固定场地上侧三分之一的有效位置占比：红队 {red['y_lanes'][0]*100:.1f}%，蓝队 {blue['y_lanes'][0]*100:.1f}%。这是场地空间分布，不直接表示攻守方向。
+2. 两队纵向重心分离最大的分钟：{minute_list(stretched)}；最压缩的分钟：{minute_list(compressed)}。建议回看这些时段核对阵线脱节、接应和局部压迫。
+3. 阵型宽度、长度只在同队至少 3 名球员有有效米制位置时统计；需结合原视频判读，不应单独作为战术结论。
 
 ## 团队空间统计
 
@@ -372,12 +478,12 @@ def main() -> None:
 - `team_centres_timeline.png`：每分钟纵向重心变化。
 - `team_shape_timeline.png`：每分钟横向宽度与纵向长度。
 - `minute_metrics.csv`：可进一步筛选的逐分钟数据。
-- 标注视频：每秒 1 帧、保留完整约 30 分钟时间轴，显示球员检测、分队与俯视投影。
+- 标注视频：保留输入尺寸与时间轴，显示球员检测、分队与俯视投影。
 
 ## 可信度与限制
 
 1. 这是 XbotGo 自动跟拍的单机位视频；镜头视野随球移动，因此热图仍有“相机关注区域”偏差，不能等同于全场 GPS 数据。
-2. 球在 1080p 广角画面中像素过小，专用与综合模型均未达到可靠召回率，所以本报告不提供控球率、传球、射门、进球或球员持球事件。
+2. 足球由独立高分辨率模型与短时跟踪生成；控球结果仍应在人工校验球检出精度后使用。
 3. 边裁及贴近边线的场外人员偶尔会被识别成球员。统计已要求投影落在场地边界内并使用场地关键点质量门槛，但仍可能有少量残留。
 4. 低帧率策略用于团队空间趋势，不适合个人跑动距离、冲刺次数和瞬时速度；这些指标已主动关闭。
 5. 球员编号是短期跟踪 ID，不是球衣号码，不能据此做个人级结论。

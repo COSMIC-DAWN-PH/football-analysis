@@ -8,13 +8,13 @@
 
 ## 功能
 
-- 使用 YOLO 检测足球、球员、守门员和裁判。
-- 使用 ByteTrack 生成短期目标跟踪 ID。
-- 检测 32 个球场关键点，并通过单应性变换进行位置映射。
+- 使用独立高分辨率全图 + 2×2 切片 YOLO 检测足球，人员与官员单独检测。
+- 球员使用 ByteTrack，足球使用独立常速短时跟踪。
+- 使用 32 个米制球场关键点、RANSAC 和 LK 光流动态标定移动镜头。
 - 结合草地遮罩与 K-Means，根据球衣颜色分配球队。
 - 生成球员俯视投影与动态 Voronoi 控制区域。
-- 可选球员速度估算与模型推断的累计控球率叠加。
-- 输出标注 MP4，以及逐帧目标和关键点 JSONL。
+- 按真实时间戳鲁棒估计球员和足球速度，可选控球率叠加。
+- 按输入原尺寸输出 MP4，并输出目标、关键点和标定 JSONL。
 - 可选战术摘要、热图、时间线和质量指标。
 - 支持无窗口运行与 OpenVINO 模型目录。
 
@@ -25,9 +25,10 @@
 | 增强项 | 具体变化 | 带来的作用 |
 |---|---|---|
 | 可配置 CLI | 无须修改 Python，即可设置视频路径、模型路径、轨迹目录、批量大小、起始偏移、球队名称、四组球衣颜色、预览、速度和控球标注。 | 同一份代码可以分析不同比赛，也便于脚本化运行。 |
-| 模型自动回退 | 两个检测器都会依次尝试 OpenVINO FP16、普通 OpenVINO 和 PyTorch `.pt`；显式传入 `--object-model` 或 `--keypoints-model` 可覆盖自动选择。 | 有优化模型时自动利用，没有时仍兼容 `.pt`。 |
+| 模型自动回退 | 人员、关键点和独立足球检测器都依次尝试 OpenVINO FP16、OpenVINO 和 `.pt`。 | 有优化模型时自动利用，没有时仍兼容 `.pt`。 |
 | 流式 JSONL 轨迹 | 每个已处理帧作为一行紧凑 JSON 追加到目标和关键点文件。 | 长视频不再每帧读取并重写不断增大的 JSON 数组。 |
-| 更稳健的球场映射 | 关键点保持原视频 16:9 几何；允许关键点缺失和单应矩阵计算失败，弱检测帧可沿用上一帧平滑后的单应矩阵。 | 某一帧漏掉球场标志时，不容易导致整段任务退出。 |
+| 动态米制球场映射 | 每场真实长宽生成 32 点，RANSAC 剔除离群，LK 光流最多续接 1 秒。 | 镜头平移、缩放后不会无限沿用旧投影。 |
+| 专用足球链路 | 全图和 20% 重叠切片候选统一 NMS，再进入米制场地约束的短时跟踪。 | 小球不再与球员 ByteTrack 共用阈值。 |
 | 稳定的球队分配 | 按“目标类型 + track ID”缓存球队判断。 | 不必每帧对同一短期轨迹重复执行 K-Means，也能减少球队标签闪烁。 |
 | 独立的分析图层 | 速度估算与控球率标注可分别开关，并且默认关闭。 | 低采样率战术分析不会默认展示不可靠的瞬时指标。 |
 | 无窗口处理 | `--no-preview` 会跳过 OpenCV 窗口。 | 可在服务器或无人值守环境运行。 |
@@ -37,7 +38,7 @@
 
 相对上游需要注意的默认行为变化：
 
-- 目标检测置信度默认为 `0.25`，足球为 `0.05`，球场检测为 `0.20`，关键点为 `0.50`。
+- 人员检测置信度默认为 `0.25`，专用足球候选为 `0.02`，球场检测为 `0.20`，关键点为 `0.50`。
 - 默认 batch size 为 `1`；预览默认开启，速度估算和控球率标注默认关闭。
 - 投影缺失时，投影绘制、控球分配和标注阶段会跳过对应目标，而不是把它当成致命错误。
 - track ID 仍然只是 ByteTrack 的短期编号；缓存球队标签并不会让它变成永久球员身份。
@@ -51,6 +52,7 @@
 - 推荐 Python 3.11。
 - 支持 Windows、Linux 和 macOS。
 - 目标检测模型必须依次包含 `ball`、`goalkeeper`、`player`、`referee` 四类。
+- 独立足球模型的类别 `0` 必须为 `ball`。
 - 球场姿态模型必须输出 32 个关键点。
 
 Python 依赖版本见 [`requirements.txt`](requirements.txt)。CPU 可以运行，但完整视频处理较慢；兼容硬件上的 CUDA 或 OpenVINO 通常能显著提高速度。
@@ -84,6 +86,7 @@ python -m pip install -r requirements.txt
 ```text
 models/weights/object-detection.pt
 models/weights/keypoints-detection.pt
+models/weights/ball-detection.pt
 ```
 
 每个检测器都会按以下顺序选择第一个存在的路径：
@@ -96,6 +99,10 @@ models/weights/object-detection.pt
 models/weights/keypoints-detection_openvino_model_fp16/
 models/weights/keypoints-detection_openvino_model/
 models/weights/keypoints-detection.pt
+
+models/weights/ball-detection_openvino_model_fp16/
+models/weights/ball-detection_openvino_model/
+models/weights/ball-detection.pt
 ```
 
 处理视频前检查本地环境：
@@ -113,8 +120,8 @@ models/weights/keypoints-detection.pt
 ```powershell
 .\.venv\Scripts\python.exe main.py `
   --input input_videos\match.mp4 `
-  --output output_videos\match-analysis.mp4 `
-  --tracks-dir output_videos\match-tracks `
+  --run-dir output_videos\match `
+  --pitch-length-m 105 --pitch-width-m 68 `
   --batch-size 1 `
   --club1-name Red --club1-player 220,30,30 --club1-goalkeeper 20,20,20 `
   --club2-name Blue --club2-player 30,80,220 --club2-goalkeeper 240,220,30 `
@@ -126,14 +133,18 @@ models/weights/keypoints-detection.pt
 | 参数 | 默认值 | 用途 |
 |---|---|---|
 | `--input PATH` | 必填 | 输入比赛视频。 |
-| `--output PATH` | `output_videos/analysis.mp4` | 标注 MP4 路径；父目录会自动创建。 |
+| `--output PATH` | `<run-dir>/<任务名>-analysis.mp4` | 标注 MP4 路径；父目录会自动创建。 |
+| `--run-dir PATH` | `output_videos/<输入名>` | 本次任务的统一输出目录。输入名末尾的 `-input` 或 `_input` 会自动去除。 |
 | `--object-model PATH` | 自动回退 | 目标检测 `.pt` 文件或 OpenVINO 模型目录。 |
 | `--keypoints-model PATH` | 自动回退 | 球场姿态 `.pt` 文件或 OpenVINO 模型目录。 |
+| `--ball-model PATH` | 自动回退 | 独立足球 `.pt` 文件或 OpenVINO 模型目录。 |
 | `--field-image PATH` | `input_videos/field_2d_v2.png` | 俯视投影面板使用的球场底图。 |
-| `--tracks-dir PATH` | `output_videos` | 两个轨迹 JSONL 的保存目录。 |
+| `--pitch-length-m M` | 必填 | 本场实测边线长度（米）。 |
+| `--pitch-width-m M` | 必填 | 本场实测球门线宽度（米）。 |
+| `--tracks-dir PATH` | `<run-dir>/raw` | 三个原始 JSONL 的保存目录。 |
 | `--batch-size N` | `1` | 推理批量，最小为 1。 |
 | `--skip-seconds N` | `0` | 跳过源视频开头的秒数，不能为负数。 |
-| `--estimate-speed` / `--no-estimate-speed` | 关闭 | 计算并绘制平滑后的球员速度。 |
+| `--estimate-speed` / `--no-estimate-speed` | 关闭 | 计算并绘制平滑后的球员与足球速度。 |
 | `--annotate-possession` / `--no-annotate-possession` | 关闭 | 绘制模型估算的累计控球率。 |
 | `--preview` / `--no-preview` | 开启 | 显示或关闭 OpenCV 实时窗口。 |
 | `--club1-name NAME` | `Club1` | 第一支球队名称；若要运行当前汇总脚本，应使用 `Red`。 |
@@ -151,25 +162,28 @@ models/weights/keypoints-detection.pt
 
 主流水线会生成：
 
-- `--output` 指定的标注视频。
-- `--tracks-dir` 下的 `object_tracks.jsonl`。
-- `--tracks-dir` 下的 `keypoint_tracks.jsonl`。
+- `<run-dir>/<任务名>-analysis.mp4` 标注视频。
+- `<run-dir>/raw/object_tracks.jsonl`。
+- `<run-dir>/raw/keypoint_tracks.jsonl`。
+- `<run-dir>/raw/calibration_tracks.jsonl`。
 
-JSONL 每一行对应一个已处理帧。根据目标类型和启用的分析功能，目标记录可能包含 `bbox`、`club`、`club_color`、`projection`、`has_ball` 和 `speed`。
+默认情况下，每次任务的分析视频、`raw` 原始轨迹和 `summary` 摘要都会归入同一个任务目录。仍可使用 `--output` 与 `--tracks-dir` 覆盖具体路径。
+
+JSONL 每一行对应一个已处理帧。目标记录可包含 `bbox`、`confidence`、`position_m`、`projection`、`club`、`has_ball` 和 `speed`；足球还有 `observed`、`track_confidence`、`track_segment`、`track_confirmed` 和 `speed_status`。足球只在同一确认轨迹段内通过检测置信度、标定质量和鲁棒运动拟合时写入 `speed`；否则 `speed_status` 为 `pending`，画面显示 `Ball speed: pending`。
 
 `object_tracks.jsonl` 每行包含四类对象。JSON 序列化后，数字 track ID 会变成字符串：
 
 ```json
-{"ball":{"3":{"bbox":[915.2,511.0,928.4,525.7],"projection":[271.6,173.1]}},"goalkeeper":{},"player":{"12":{"bbox":[804.1,392.5,858.8,556.2],"club":"Red","club_color":[220,30,30],"projection":[244.9,181.3],"has_ball":true,"speed":18.4}},"referee":{}}
+{"ball":{"1":{"bbox":[915.2,511.0,928.4,525.7],"confidence":0.72,"position_m":[52.1,31.4],"observed":true,"track_confidence":0.72}},"goalkeeper":{},"player":{"12":{"bbox":[804.1,392.5,858.8,556.2],"confidence":0.91,"position_m":[48.2,35.7],"projection":[244.9,181.3],"club":"Red","speed":18.4}},"referee":{}}
 ```
 
-对已经检出的目标，只有 `bbox` 是必有字段。`projection`、`club`、`club_color`、`has_ball` 和 `speed` 都是条件性字段，写入器不会额外生成 `confidence`。`keypoint_tracks.jsonl` 每行是一个对象：字符串键为球场关键点编号，值为图像坐标，例如 `{"0":[312.4,104.8],"13":[960.1,221.7]}`。
+`position_m` 和 `projection` 会在标定无效或结果超出球场时省略；无效速度不会强制封顶。预测球标记为 `observed:false`，0.5 秒后失效。`calibration_tracks.jsonl` 记录时间戳、状态、关键点/内点数、重投影误差、覆盖率、光流质量和标定年龄。
 
 上游旧版 `object_tracks.json` 数组属于历史格式。新版采用 JSON Lines，应逐行解析，不能把整个文件当成一个 JSON 数组。使用同一轨迹目录启动新任务时，程序会先删除该目录中上次生成的两个 JSONL 文件。
 
-输出视频会组合原画面、目标 ID、球队颜色标记、球场关键点和俯视投影。速度文字与控球率图层可分别启用或关闭。
+输出视频会组合原画面、目标 ID、球队颜色标记、球场关键点和俯视投影。有效球员速度会保留显示约 1 秒；足球速度只在当前帧通过可信度门槛时显示，否则标记为 `Ball speed: pending`。控球未确认时会明确标记为 `Unconfirmed`。速度文字与控球率图层可分别启用或关闭。
 
-生成视频固定为 `1920×1080`，处理完成后编码为 MP4；不会复制源视频音轨。
+生成视频保留输入画面尺寸和宽高比，处理后编码为 MP4；不会复制源视频音轨。
 
 ## 本地 Web GUI
 
@@ -199,17 +213,19 @@ CPU 上的视频分析可能明显慢于源视频时长。只关闭浏览器页�
 
 ```powershell
 .\.venv\Scripts\python.exe summarize_match.py `
-  --tracks-dir output_videos\match-tracks `
-  --output-dir output_videos\match-summary `
+  --tracks-dir output_videos\match\raw `
   --fps 1 `
-  --source input_videos\match.mp4
+  --source input_videos\match.mp4 `
+  --pitch-length-m 105 --pitch-width-m 68
 ```
+
+省略 `--output-dir` 时，摘要会自动写入 `output_videos\match\summary`；仍可显式传入该参数覆盖路径。
 
 `--fps` 表示 JSONL 轨迹每秒包含多少个样本，不应盲目填写原视频帧率。例如，若轨迹来自“源视频每秒抽取 1 帧”，应填写 `--fps 1`；逐帧处理时通常才填写源视频 FPS。
 
-当前汇总实现只识别球队名 `Red` 和 `Blue`。如果后续需要汇总轨迹，运行主程序时应把 `--club1-name` 和 `--club2-name` 设置成这两个准确名称。脚本同时要求 `object_tracks.jsonl` 和 `keypoint_tracks.jsonl`，两者长度不同时只分析较短文件覆盖的帧。
+当前汇总依旧识别球队名 `Red` 和 `Blue`。它优先使用 `position_m` 和 `calibration_tracks.jsonl`；旧版目标/关键点 JSONL 仍可通过逐帧 RANSAC 兼容读取。
 
-一个画面只有同时满足以下门槛才会进入战术统计：至少 8 个关键点、至少 6 个 RANSAC 内点、内点率不低于 40%、内点中位重投影误差不高于 4 像素、目标球场 X/Y 跨度分别不低于 150/100 像素。之后，球员或守门员脚点还必须落在固定的 `100 × 50 m` 球场范围内。
+直接标定门槛为：至少 6 个关键点、5 个 RANSAC 内点、内点率至少 60%、中位重投影误差不超过 5 px，并覆盖球场长/宽至少 30%/25%。光流最多续接 1 秒，超出实测球场边界的位置不写入。
 
 汇总目录包含：
 
@@ -228,6 +244,9 @@ CPU 上的视频分析可能明显慢于源视频时长。只关闭浏览器页�
 
 - [`models/object_detection_train.ipynb`](models/object_detection_train.ipynb)
 - [`models/keypoints_detection_train.ipynb`](models/keypoints_detection_train.ipynb)
+- [`training/README.md`](training/README.md)：本地/Roboflow YOLO 数据准备、防泄漏校验、云 GPU 微调与 OpenVINO FP16 导出。
+
+第一轮建议 800 帧足球数据（至少 600 个可见球正样本，并包含空场和困难负例）加 400 帧 32 点球场数据。工具默认导出候选帧，校验分组重复和水平翻转顺序；训练脚本不会自动覆盖默认权重。
 
 训练 notebook 通过 Roboflow 下载数据，因此需要你自己的 API 密钥。请把 `config.example.py` 复制为 `config.py`，只在本地填写密钥，不要提交。
 
@@ -241,9 +260,9 @@ CPU 上的视频分析可能明显慢于源视频时长。只关闭浏览器页�
 ## 已知限制
 
 - 视频中的 ID 是短期跟踪 ID，不是球员身份或球衣号码。
-- 单个移动机位会带来投影误差和不完整的球场覆盖。
+- 单个移动机位仍会带来不完整球场覆盖；标定过期或质量不足时会省略投影和速度。
 - 足球在远景中像素很小，会影响检出率和控球判断。
-- 速度来自相邻帧投影位置，跟踪或单应矩阵跳变时可能触及速度上限。
+- 速度来自带时间戳米制位置的鲁棒拟合；超过 45 km/h 或加速度不合理的观测会被丢弃，不再封顶。
 - 分队依赖代表色，可能受到光照、背心、观众和相近球衣颜色干扰。
 - 用户须自行确认模型权重及其许可证是否适用于具体用途。
 

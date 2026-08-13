@@ -10,13 +10,13 @@ A video-analysis pipeline for football footage. It detects and tracks players, g
 
 ## Features
 
-- YOLO-based detection for the ball, players, goalkeepers, and referees.
-- ByteTrack-based short-term object IDs.
-- 32-point football-pitch keypoint detection and homography mapping.
+- Dedicated high-resolution, tiled YOLO ball detection plus player/official detection.
+- ByteTrack-based short-term player IDs and a separate constant-velocity ball track.
+- Dynamic 32-point metric-pitch calibration with RANSAC and short LK optical-flow continuation.
 - Jersey-color team assignment with green-pitch masking and K-Means.
 - Top-down player projection and a dynamic Voronoi control view.
-- Optional player-speed estimation and model-estimated possession overlay.
-- Annotated MP4 output and per-frame object/keypoint JSONL files.
+- Timestamp-based robust player and ball speed estimation with a model-estimated possession overlay.
+- Native-resolution annotated MP4 plus per-frame object, keypoint, and calibration JSONL files.
 - Optional tactical summaries, heatmaps, timelines, and quality metrics.
 - Headless execution and OpenVINO model-directory support.
 
@@ -27,9 +27,10 @@ Compared with the original upstream demo, this fork turns the hard-coded example
 | Enhancement | What changed | Why it matters |
 |---|---|---|
 | Configurable CLI | Video paths, model paths, track directory, batch size, start offset, team names, four jersey colors, preview, speed, and possession can be selected without editing Python. | One checkout can analyze different matches and run in scripts. |
-| Automatic model fallback | Each detector tries an OpenVINO FP16 directory, then a regular OpenVINO directory, then the PyTorch `.pt` checkpoint. Explicit `--object-model` and `--keypoints-model` values override this selection. | Uses an optimized local export when available while retaining `.pt` compatibility. |
+| Automatic model fallback | The object, keypoint, and dedicated ball detectors try an OpenVINO FP16 directory, regular OpenVINO, then PyTorch `.pt`. Explicit model options override selection. | Uses an optimized local export when available while retaining `.pt` compatibility. |
 | Streaming JSONL tracks | Object and keypoint records are appended as one compact JSON value per processed frame. | Long videos no longer require reading and rewriting an ever-growing JSON array for every frame. |
-| Safer pitch mapping | Keypoints keep the source frame's 16:9 geometry; missing detections and failed homographies are tolerated, and the last smoothed homography can bridge a temporarily weak frame. | A missed landmark frame is less likely to terminate the complete job. |
+| Dynamic metric pitch mapping | The supplied real pitch dimensions generate the model's 32 landmarks. RANSAC rejects outliers; LK optical flow continues an accepted camera pose for at most one second. | Pan, tilt, and zoom no longer reuse one stale projection indefinitely. |
+| Dedicated ball path | Whole-frame and overlapping 2×2 tile inference feed a metric-aware temporal tracker. | Small balls are not coupled to ByteTrack's player thresholds and lost detections can be marked as short predictions. |
 | Stable team assignment | The predicted team is cached for each `(object type, track ID)` pair. | Avoids running K-Means on the same short-term track every frame and reduces label flicker. |
 | Independent overlays | Speed estimation and possession annotation can be enabled separately and are disabled by default. | Low-sample-rate tactical runs do not silently present unreliable instantaneous metrics. |
 | Headless processing | `--no-preview` bypasses the OpenCV window. | The pipeline can run on servers and unattended machines. |
@@ -39,7 +40,7 @@ Compared with the original upstream demo, this fork turns the hard-coded example
 
 Important behavior changes from upstream:
 
-- Detection defaults are object confidence `0.25`, ball confidence `0.05`, pitch detection confidence `0.20`, and keypoint confidence `0.50`.
+- Detection defaults are object confidence `0.25`, dedicated ball candidate confidence `0.02`, pitch detection confidence `0.20`, and keypoint confidence `0.50`.
 - The default batch size is `1`. Preview is on; speed estimation and possession annotation are off.
 - Missing projections are skipped by the projection, possession, and annotation stages instead of being treated as fatal errors.
 - Track IDs remain ByteTrack's short-term IDs. Cached team labels do not turn them into persistent player identities.
@@ -55,6 +56,7 @@ The repository contains source code, training notebooks, tests, documentation, a
 - Python 3.11 is recommended.
 - Windows, Linux, or macOS.
 - A compatible object-detection checkpoint with classes in this order: `ball`, `goalkeeper`, `player`, `referee`.
+- A dedicated ball-detection checkpoint whose class `0` is `ball`.
 - A compatible pose checkpoint with 32 pitch keypoints.
 
 The pinned Python dependencies are listed in [`requirements.txt`](requirements.txt). CPU inference works but can be slow. CUDA or OpenVINO may substantially improve throughput on supported hardware.
@@ -88,6 +90,7 @@ Model weights are not redistributed in this repository. Train them with the incl
 ```text
 models/weights/object-detection.pt
 models/weights/keypoints-detection.pt
+models/weights/ball-detection.pt
 ```
 
 For each detector, automatic selection uses the first existing path in this order:
@@ -100,6 +103,10 @@ models/weights/object-detection.pt
 models/weights/keypoints-detection_openvino_model_fp16/
 models/weights/keypoints-detection_openvino_model/
 models/weights/keypoints-detection.pt
+
+models/weights/ball-detection_openvino_model_fp16/
+models/weights/ball-detection_openvino_model/
+models/weights/ball-detection.pt
 ```
 
 Check the local setup before processing a video:
@@ -117,8 +124,8 @@ Place a video under `input_videos/` or pass any readable local path. Set the RGB
 ```powershell
 .\.venv\Scripts\python.exe main.py `
   --input input_videos\match.mp4 `
-  --output output_videos\match-analysis.mp4 `
-  --tracks-dir output_videos\match-tracks `
+  --run-dir output_videos\match `
+  --pitch-length-m 105 --pitch-width-m 68 `
   --batch-size 1 `
   --club1-name Red --club1-player 220,30,30 --club1-goalkeeper 20,20,20 `
   --club2-name Blue --club2-player 30,80,220 --club2-goalkeeper 240,220,30 `
@@ -130,14 +137,18 @@ Complete CLI:
 | Option | Default | Purpose |
 |---|---|---|
 | `--input PATH` | required | Input match video. |
-| `--output PATH` | `output_videos/analysis.mp4` | Annotated MP4 path. Parent directories are created automatically. |
+| `--output PATH` | `<run-dir>/<task-name>-analysis.mp4` | Annotated MP4 path. Parent directories are created automatically. |
+| `--run-dir PATH` | `output_videos/<input-name>` | Unified folder for this run. A trailing `-input` or `_input` is removed from the task name. |
 | `--object-model PATH` | automatic fallback | Object detector `.pt` file or OpenVINO model directory. |
 | `--keypoints-model PATH` | automatic fallback | Pitch pose `.pt` file or OpenVINO model directory. |
+| `--ball-model PATH` | automatic fallback | Dedicated ball detector `.pt` file or OpenVINO model directory. |
 | `--field-image PATH` | `input_videos/field_2d_v2.png` | Top-down pitch image used by the projection panel. |
-| `--tracks-dir PATH` | `output_videos` | Directory for both track JSONL files. |
+| `--pitch-length-m M` | required | Measured touchline length for this specific pitch. |
+| `--pitch-width-m M` | required | Measured goal-line width for this specific pitch. |
+| `--tracks-dir PATH` | `<run-dir>/raw` | Directory for the three raw JSONL files. |
 | `--batch-size N` | `1` | Inference batch size; must be at least 1. |
 | `--skip-seconds N` | `0` | Skip the beginning of the source; cannot be negative. |
-| `--estimate-speed` / `--no-estimate-speed` | disabled | Calculate and draw smoothed player speed. |
+| `--estimate-speed` / `--no-estimate-speed` | disabled | Calculate and draw smoothed player and ball speed. |
 | `--annotate-possession` / `--no-annotate-possession` | disabled | Draw accumulated model-estimated possession. |
 | `--preview` / `--no-preview` | enabled | Show or suppress the live OpenCV window. |
 | `--club1-name NAME` | `Club1` | First team name. Use `Red` for compatibility with the current summary script. |
@@ -155,25 +166,28 @@ Run `python main.py --help` for the complete interface.
 
 The main pipeline produces:
 
-- An annotated video at the path passed to `--output`.
-- `object_tracks.jsonl` under `--tracks-dir`.
-- `keypoint_tracks.jsonl` under `--tracks-dir`.
+- An annotated video at `<run-dir>/<task-name>-analysis.mp4`.
+- `<run-dir>/raw/object_tracks.jsonl`.
+- `<run-dir>/raw/keypoint_tracks.jsonl`.
+- `<run-dir>/raw/calibration_tracks.jsonl`.
 
-Each JSONL line represents one processed frame. Object records may include `bbox`, `club`, `club_color`, `projection`, `has_ball`, and `speed`, depending on the object type and enabled analysis.
+By default, each run groups its annotated video, `raw` tracks, and `summary` artifacts in one task folder. `--output` and `--tracks-dir` remain available as explicit overrides.
+
+Each JSONL line represents one processed frame. Object records may include `bbox`, `confidence`, `position_m`, `projection`, `club`, `club_color`, `has_ball`, and `speed`. Ball records also expose `observed`, `track_confidence`, `track_segment`, `track_confirmed`, and `speed_status`. Ball `speed` is emitted only when a confirmed segment passes detection-confidence, calibration-quality, and robust-motion checks; otherwise `speed_status` is `pending` and the video shows `Ball speed: pending`.
 
 `object_tracks.jsonl` has four top-level object groups. JSON serialization turns numeric track IDs into strings:
 
 ```json
-{"ball":{"3":{"bbox":[915.2,511.0,928.4,525.7],"projection":[271.6,173.1]}},"goalkeeper":{},"player":{"12":{"bbox":[804.1,392.5,858.8,556.2],"club":"Red","club_color":[220,30,30],"projection":[244.9,181.3],"has_ball":true,"speed":18.4}},"referee":{}}
+{"ball":{"1":{"bbox":[915.2,511.0,928.4,525.7],"confidence":0.72,"position_m":[52.1,31.4],"observed":true,"track_confidence":0.72}},"goalkeeper":{},"player":{"12":{"bbox":[804.1,392.5,858.8,556.2],"confidence":0.91,"position_m":[48.2,35.7],"projection":[244.9,181.3],"club":"Red","speed":18.4}},"referee":{}}
 ```
 
-Only `bbox` is guaranteed for a detected object. `projection`, `club`, `club_color`, `has_ball`, and `speed` are conditional; the writer does not add a `confidence` field. Each `keypoint_tracks.jsonl` line is an object whose string keys are landmark indexes and whose values are image coordinates, for example `{"0":[312.4,104.8],"13":[960.1,221.7]}`.
+`position_m` and `projection` are omitted when calibration is not usable or the projected point is outside the pitch. Invalid speed is omitted rather than clamped. A predicted ball has `observed:false` and expires after 0.5 seconds. Each `keypoint_tracks.jsonl` line maps landmark indexes to image coordinates. Each calibration line records the timestamp, status, keypoint/inlier counts, reprojection error, coverage spans, flow quality, and calibration age.
 
-The old upstream `object_tracks.json` array is a legacy format. New output uses JSON Lines: consume the file one line at a time rather than loading it as one JSON array. Starting a new run in the same track directory removes the two previous JSONL files.
+The old upstream `object_tracks.json` array is a legacy format. New output uses JSON Lines: consume the file one line at a time rather than loading it as one JSON array. Starting a new run in the same track directory removes previous generated JSONL files.
 
-The video combines the source frame with IDs, team-colored annotations, pitch keypoints, and a top-down pitch projection. Speed and possession graphics are controlled independently.
+The video combines the source frame with IDs, team-colored annotations, pitch keypoints, and a top-down pitch projection. Valid player speed remains visible for about one second. Ball speed is shown only on frames that pass the trust gates; otherwise it is labeled `Ball speed: pending`. Unassigned possession is labeled `Unconfirmed`. Speed and possession graphics are controlled independently.
 
-The generated video is fixed at `1920×1080`. Frames are encoded as MP4 video after processing; the source audio track is not copied.
+The generated video keeps the input frame dimensions and aspect ratio. Frames are encoded as MP4 after processing; the source audio track is not copied.
 
 ## Local web GUI
 
@@ -203,17 +217,19 @@ This optional script also requires Matplotlib: `python -m pip install matplotlib
 
 ```powershell
 .\.venv\Scripts\python.exe summarize_match.py `
-  --tracks-dir output_videos\match-tracks `
-  --output-dir output_videos\match-summary `
+  --tracks-dir output_videos\match\raw `
   --fps 1 `
-  --source input_videos\match.mp4
+  --source input_videos\match.mp4 `
+  --pitch-length-m 105 --pitch-width-m 68
 ```
+
+When `--output-dir` is omitted, the summary is written to `output_videos\match\summary`; pass the option explicitly to override it.
 
 `--fps` is the sampling rate represented by the JSONL lines, not automatically the original video's frame rate. For example, tracks produced from one sampled frame per source second require `--fps 1`; normal full-frame processing usually uses the source FPS.
 
-The current summary implementation recognizes only team names `Red` and `Blue`, so use those exact `--club1-name` and `--club2-name` values when the tracks will be summarized. It requires matching `object_tracks.jsonl` and `keypoint_tracks.jsonl`; analysis stops at the shorter file.
+The current summary recognizes team names `Red` and `Blue`, so use those exact names when tracks will be summarized. It prefers metric `position_m` and `calibration_tracks.jsonl`; old object/keypoint JSONL remains readable through legacy per-frame RANSAC projection.
 
-A frame is accepted only when the homography has at least 8 keypoints, at least 6 RANSAC inliers, an inlier ratio of at least 40%, median inlier reprojection error no greater than 4 pixels, and destination-pitch spans of at least 150 pixels on X and 100 pixels on Y. Player and goalkeeper feet must then project inside the fixed `100 × 50 m` pitch.
+A detected calibration needs at least 6 keypoints, 5 RANSAC inliers, a 60% inlier ratio, median reprojection error no greater than 5 px, and coverage of at least 30% of pitch length and 25% of width. Flow can continue it for up to one second with decaying quality. Positions outside the supplied metric pitch are not written.
 
 The report directory contains:
 
@@ -228,12 +244,13 @@ These summaries are observational estimates from a single moving camera. They ar
 
 ## Training
 
-The repository includes:
+The repository includes the older notebooks plus a reproducible local/Roboflow dataset workflow:
 
 - [`models/object_detection_train.ipynb`](models/object_detection_train.ipynb)
 - [`models/keypoints_detection_train.ipynb`](models/keypoints_detection_train.ipynb)
+- [`training/README.md`](training/README.md)
 
-Training uses Roboflow downloads and therefore requires your own API key. Copy `config.example.py` to `config.py`, add the key locally, and never commit it.
+The new tools extract 800 ball and 400 pitch annotation candidates, validate split leakage and the 32-point flip order, fine-tune YOLO11s/keypoint weights on cloud CUDA, and export OpenVINO FP16. They accept local YOLO datasets or an unpacked Roboflow YOLO export. Weights are never promoted automatically.
 
 The notebooks directly reference two datasets published by **Mihailo** on Roboflow Universe:
 
@@ -245,9 +262,9 @@ Review the dataset pages and their current terms before downloading, training, o
 ## Limitations
 
 - IDs are short-term tracker IDs, not player identities or jersey numbers.
-- A moving single camera introduces projection error and incomplete pitch coverage.
+- A moving single camera still has incomplete pitch coverage; projection and speed are omitted when calibration is stale or weak.
 - Small-ball detection is difficult and can affect possession estimates.
-- Speed is inferred from frame-to-frame projected positions and may reach the configured cap after tracking or homography jumps.
+- Speed is a robust fit over timestamped metric positions. Values above 45 km/h or with implausible acceleration are rejected, not capped.
 - Team assignment depends on representative colors and can be confused by lighting, bibs, spectators, or similar kits.
 - Model checkpoints and their licenses are the user's responsibility.
 

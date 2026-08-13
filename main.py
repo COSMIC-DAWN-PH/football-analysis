@@ -1,13 +1,12 @@
 import argparse
 from pathlib import Path
 
-import numpy as np
-
 from annotation import FootballVideoProcessor
 from ball_to_player_assignment import BallToPlayerAssigner
 from club_assignment import Club, ClubAssigner
-from tracking import KeypointsTracker, ObjectTracker
+from tracking import BallDetector, BallTracker, KeypointsTracker, ObjectTracker
 from utils import process_video
+from position_mappers import PitchGeometry
 
 
 DEFAULT_OBJECT_MODEL = Path("models/weights/object-detection_openvino_model_fp16")
@@ -21,6 +20,11 @@ if not DEFAULT_KEYPOINTS_MODEL.exists():
     DEFAULT_KEYPOINTS_MODEL = Path("models/weights/keypoints-detection_openvino_model")
 if not DEFAULT_KEYPOINTS_MODEL.exists():
     DEFAULT_KEYPOINTS_MODEL = Path("models/weights/keypoints-detection.pt")
+DEFAULT_BALL_MODEL = Path("models/weights/ball-detection_openvino_model_fp16")
+if not DEFAULT_BALL_MODEL.exists():
+    DEFAULT_BALL_MODEL = Path("models/weights/ball-detection_openvino_model")
+if not DEFAULT_BALL_MODEL.exists():
+    DEFAULT_BALL_MODEL = Path("models/weights/ball-detection.pt")
 DEFAULT_FIELD_IMAGE = Path("input_videos/field_2d_v2.png")
 
 
@@ -36,6 +40,29 @@ def _rgb(value: str) -> tuple[int, int, int]:
     return channels
 
 
+def _run_name(input_path: Path) -> str:
+    """Return a stable output folder name for an input video."""
+    name = input_path.stem
+    for suffix in ("-input", "_input"):
+        if name.casefold().endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def _resolve_output_layout(
+    input_path: Path,
+    run_dir: Path | None = None,
+    output: Path | None = None,
+    tracks_dir: Path | None = None,
+) -> tuple[Path, Path, Path]:
+    """Resolve the run root, annotated video, and raw-track directory."""
+    name = _run_name(input_path)
+    resolved_run_dir = run_dir or Path("output_videos") / name
+    resolved_output = output or resolved_run_dir / f"{name}-analysis.mp4"
+    resolved_tracks_dir = tracks_dir or resolved_run_dir / "raw"
+    return resolved_run_dir, resolved_output, resolved_tracks_dir
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Analyze a football video with YOLO, ByteTrack, and pitch mapping."
@@ -44,20 +71,44 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("output_videos/analysis.mp4"),
+        default=None,
         help="Annotated output video",
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=Path,
+        default=None,
+        help="Run folder; defaults to output_videos/<input-name>",
     )
     parser.add_argument("--object-model", type=Path, default=DEFAULT_OBJECT_MODEL)
     parser.add_argument("--keypoints-model", type=Path, default=DEFAULT_KEYPOINTS_MODEL)
+    parser.add_argument("--ball-model", type=Path, default=DEFAULT_BALL_MODEL)
     parser.add_argument("--field-image", type=Path, default=DEFAULT_FIELD_IMAGE)
-    parser.add_argument("--tracks-dir", type=Path, default=Path("output_videos"))
+    parser.add_argument(
+        "--pitch-length-m",
+        type=float,
+        required=True,
+        help="Measured touchline length of this pitch in metres",
+    )
+    parser.add_argument(
+        "--pitch-width-m",
+        type=float,
+        required=True,
+        help="Measured goal-line width of this pitch in metres",
+    )
+    parser.add_argument(
+        "--tracks-dir",
+        type=Path,
+        default=None,
+        help="Raw JSONL directory; defaults to <run-dir>/raw",
+    )
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--skip-seconds", type=int, default=0)
     parser.add_argument(
         "--estimate-speed",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Estimate and draw player speed (disabled by default for sampled video)",
+        help="Estimate and draw player and ball speed (disabled by default for sampled video)",
     )
     parser.add_argument(
         "--annotate-possession",
@@ -99,9 +150,22 @@ def main(argv: list[str] | None = None) -> None:
     if args.skip_seconds < 0:
         parser.error("--skip-seconds cannot be negative")
 
+    args.run_dir, args.output, args.tracks_dir = _resolve_output_layout(
+        args.input,
+        run_dir=args.run_dir,
+        output=args.output,
+        tracks_dir=args.tracks_dir,
+    )
+
     _require_paths(
         parser,
-        [args.input, args.object_model, args.keypoints_model, args.field_image],
+        [
+            args.input,
+            args.object_model,
+            args.keypoints_model,
+            args.ball_model,
+            args.field_image,
+        ],
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.tracks_dir.mkdir(parents=True, exist_ok=True)
@@ -110,6 +174,7 @@ def main(argv: list[str] | None = None) -> None:
         model_path=str(args.object_model),
         conf=0.25,
         ball_conf=0.05,
+        include_ball=False,
     )
     kp_tracker = KeypointsTracker(
         model_path=str(args.keypoints_model),
@@ -122,26 +187,22 @@ def main(argv: list[str] | None = None) -> None:
     club_assigner = ClubAssigner(club1, club2)
     ball_player_assigner = BallToPlayerAssigner(club1, club2)
 
-    top_down_keypoints = np.array(
-        [
-            [0, 0], [0, 57], [0, 122], [0, 229], [0, 293], [0, 351],
-            [32, 122], [32, 229], [64, 176],
-            [96, 57], [96, 122], [96, 229], [96, 293],
-            [263, 0], [263, 122], [263, 229], [263, 351],
-            [431, 57], [431, 122], [431, 229], [431, 293],
-            [463, 176], [495, 122], [495, 229],
-            [527, 0], [527, 57], [527, 122], [527, 229], [527, 293], [527, 351],
-            [210, 176], [317, 176],
-        ],
-        dtype=np.float32,
-    )
+    try:
+        pitch_geometry = PitchGeometry(args.pitch_length_m, args.pitch_width_m)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    ball_detector = BallDetector(str(args.ball_model))
+    ball_tracker = BallTracker(pitch_geometry)
 
     processor = FootballVideoProcessor(
         obj_tracker,
         kp_tracker,
+        ball_detector,
+        ball_tracker,
         club_assigner,
         ball_player_assigner,
-        top_down_keypoints,
+        pitch_geometry,
         field_img_path=str(args.field_image),
         save_tracks_dir=str(args.tracks_dir),
         draw_frame_num=True,

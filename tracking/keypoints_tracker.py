@@ -1,125 +1,96 @@
+from __future__ import annotations
+
+from typing import List, Optional
+
+import numpy as np
+import supervision as sv
+from ultralytics.engine.results import Results
+
 from tracking.abstract_tracker import AbstractTracker
 
-import cv2
-import supervision as sv
-from typing import List
-from ultralytics.engine.results import Results
-import numpy as np
 
 class KeypointsTracker(AbstractTracker):
-    """Detection and Tracking of football field keypoints"""
+    """Detect pitch landmarks periodically while exposing per-point confidence."""
 
-    def __init__(self, model_path: str, conf: float = 0.1, kp_conf: float = 0.7) -> None:
-        """
-        Initialize KeypointsTracker for tracking keypoints.
-        
-        Args:
-            model_path (str): Model path.
-            conf (float): Confidence threshold for field detection.
-            kp_conf (float): Confidence threshold for keypoints.
-        """
-        super().__init__(model_path, conf, task='pose')  # Call the Tracker base class constructor
-        self.kp_conf = kp_conf  # Keypoint Confidence Threshold
-        self.tracks = []  # Initialize tracks list
-        self.cur_frame = 0  # Frame counter initialization
-        self.original_size = (1920, 1080)  # Original resolution (1920x1080)
-        self.scale_x = 1.0
-        self.scale_y = 1.0
+    def __init__(
+        self,
+        model_path: str,
+        conf: float = 0.1,
+        kp_conf: float = 0.5,
+        imgsz: int = 1280,
+        detection_interval: int = 5,
+    ) -> None:
+        super().__init__(model_path, conf, task="pose")
+        self.kp_conf = kp_conf
+        self.imgsz = self.inference_imgsz(imgsz)
+        self.detection_interval = max(1, detection_interval)
+        self.cur_frame = 0
+        self._detect_frame = 0
+        self._force_next = True
+        self.current_confidences: dict[int, float] = {}
 
-    def detect(self, frames: List[np.ndarray]) -> List[Results]:
-        """
-        Perform keypoint detection on multiple frames.
+    def detect(self, frames: List[np.ndarray]) -> List[Optional[Results]]:
+        selected_indexes: list[int] = []
+        selected_frames: list[np.ndarray] = []
+        force = self._force_next
+        for index, frame in enumerate(frames):
+            absolute_index = self._detect_frame + index
+            if force or absolute_index % self.detection_interval == 0:
+                selected_indexes.append(index)
+                selected_frames.append(frame)
+                force = False
+        self._force_next = False
+        self._detect_frame += len(frames)
 
-        Args:
-            frames (List[np.ndarray]): List of frames for detection.
-        
-        Returns:
-            List[Results]: Detected keypoints for each frame
-        """
-        # Keep the original 16:9 geometry. Squashing the frame to 1280x1280 or
-        # histogram-equalizing it substantially reduces keypoint recall on
-        # high-angle consumer footage.
-        contrast_adjusted_frames = [self._preprocess_frame(frame) for frame in frames]
+        output: List[Optional[Results]] = [None] * len(frames)
+        if selected_frames:
+            detections = self.model.predict(
+                selected_frames,
+                conf=self.conf,
+                imgsz=self.imgsz,
+                verbose=False,
+            )
+            for index, detection in zip(selected_indexes, detections):
+                output[index] = detection
+        return output
 
-        # Use YOLOv8's batch predict method
-        detections = self.model.predict(
-            contrast_adjusted_frames,
-            conf=self.conf,
-            verbose=False,
-        )
-        return detections
-
-    def track(self, detection: Results) -> dict:
-        """
-        Perform keypoint tracking based on detections.
-        
-        Args:
-            detection (Results): Detected keypoints for a single frame.
-        
-        Returns:
-            dict: Dictionary containing tracks of the frame.
-        """
-        if detection.keypoints is None:
-            return {}
-
-        detection = sv.KeyPoints.from_ultralytics(detection)
-        
-        # Check 
-        if not detection:
-            return {}
-
-        # Extract xy coordinates, confidence, and the number of keypoints
-        xy = detection.xy[0]  # Shape: (32, 2), assuming there are 32 keypoints
-        confidence = detection.confidence[0]  # Shape: (32,), confidence values
-
-        # Create the map of keypoints with confidence greater than the threshold
-        filtered_keypoints = {
-            i: (coords[0] * self.scale_x, coords[1] * self.scale_y)  # i is the key (index), (x, y) are the values
-            for i, (coords, conf) in enumerate(zip(xy, confidence))
-            if conf > self.kp_conf
-            and 0 <= coords[0] <= self.original_size[0]
-            and 0 <= coords[1] <= self.original_size[1]
-        }
-
-        self.tracks.append(detection)
+    def track(self, detection: Optional[Results]) -> dict[int, tuple[float, float]]:
         self.cur_frame += 1
+        return self._map_detection(detection)
 
-        return filtered_keypoints
+    def detect_now(self, frame: np.ndarray) -> dict[int, tuple[float, float]]:
+        """Run an immediate detection when optical flow/calibration has failed."""
+        detection = self.model.predict(
+            [frame], conf=self.conf, imgsz=self.imgsz, verbose=False
+        )[0]
+        self._force_next = False
+        return self._map_detection(detection)
 
-    def _preprocess_frame(self, frame: np.ndarray) -> np.ndarray:
-        """
-        Preprocess the frame by adjusting contrast and resizing to 1280x1280.
-        
-        Args:
-            frame (np.ndarray): The input image frame.
-        
-        Returns:
-            np.ndarray: The resized frame with adjusted contrast.
-        """
-        return frame
-    
-    def _adjust_contrast(self, frame: np.ndarray) -> np.ndarray:
-        """
-        Adjust the contrast of the frame using Histogram Equalization.
-        
-        Args:
-            frame (np.ndarray): The input image frame.
-        
-        Returns:
-            np.ndarray: The frame with adjusted contrast.
-        """
-        # Check if the frame is colored (3 channels). If so, convert to grayscale for histogram equalization.
-        if len(frame.shape) == 3 and frame.shape[2] == 3:
-            # Convert to YUV color space
-            yuv = cv2.cvtColor(frame, cv2.COLOR_BGR2YUV)
-            
-            # Apply histogram equalization to the Y channel (luminance)
-            yuv[:, :, 0] = cv2.equalizeHist(yuv[:, :, 0])
-            
-            # Convert back to BGR format
-            frame_equalized = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR)
-        else:
-            # If the frame is already grayscale, apply histogram equalization directly
-            frame_equalized = cv2.equalizeHist(frame)
+    def _map_detection(
+        self, detection: Optional[Results]
+    ) -> dict[int, tuple[float, float]]:
+        self.current_confidences = {}
+        if detection is None or detection.keypoints is None:
+            return {}
 
-        return frame_equalized
+        keypoints = sv.KeyPoints.from_ultralytics(detection)
+        if not keypoints or len(keypoints.xy) == 0:
+            return {}
+        xy = keypoints.xy[0]
+        confidence = keypoints.confidence[0]
+        height, width = detection.orig_shape
+        result: dict[int, tuple[float, float]] = {}
+        for index, (coords, point_confidence) in enumerate(zip(xy, confidence)):
+            value = float(point_confidence)
+            if (
+                value >= self.kp_conf
+                and np.isfinite(coords).all()
+                and 0 <= coords[0] < width
+                and 0 <= coords[1] < height
+            ):
+                result[index] = (float(coords[0]), float(coords[1]))
+                self.current_confidences[index] = value
+        return result
+
+    def request_detection(self) -> None:
+        self._force_next = True

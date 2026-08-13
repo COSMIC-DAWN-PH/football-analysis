@@ -47,18 +47,56 @@ class ObjectAnnotator(AbstractAnnotator):
                 # Annotate based on object type
                 if track == 'ball':
                     frame = self.draw_triangle(frame, item['bbox'], self.ball_annotation_color)
+                    speed_status = item.get('speed_status')
+                    if speed_status == 'reliable' and 'speed' in item:
+                        frame = self.draw_ball_speed(frame, item['bbox'], item['speed'])
+                    elif speed_status == 'pending':
+                        frame = self.draw_ball_speed(frame, item['bbox'], None)
                 elif track == 'referee':
                     frame = self.draw_ellipse(frame, item['bbox'], self.referee_annotation_color, track_id, -1, track)
                 else:
                     # A missing speed means that speed estimation was deliberately
                     # disabled (for example on a low-FPS tactical sample).
-                    speed = item.get('speed', -1)
+                    speed = item.get('speed', item.get('_display_speed', -1))
                     frame = self.draw_ellipse(frame, item['bbox'], color, track_id, speed, track)
 
                     # If the player has the ball, draw a triangle to indicate it
                     if 'has_ball' in item and item['has_ball']:
                         frame = self.draw_triangle(frame, item['bbox'], color)
 
+        return frame
+
+    def draw_ball_speed(
+        self,
+        frame: np.ndarray,
+        bbox: Tuple[int, int, int, int],
+        speed: float | None,
+    ) -> np.ndarray:
+        """Draw a readable metric speed label beside the tracked ball."""
+        x, _ = get_bbox_center(bbox)
+        x = int(x) + 12
+        y = max(22, int(bbox[1]) - 10)
+        label = "Ball speed: pending" if speed is None else f"Ball {speed:.1f} km/h"
+        cv2.putText(
+            frame,
+            label,
+            (x, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (0, 0, 0),
+            3,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            frame,
+            label,
+            (x, y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
         return frame
     
 

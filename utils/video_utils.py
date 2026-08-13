@@ -64,8 +64,12 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
         print("Error: Could not open video source.")
         return
 
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    fps = float(cap.get(cv2.CAP_PROP_FPS))
+    if not np.isfinite(fps) or fps <= 0:
+        fps = 25.0
     frames_to_skip = int(skip_seconds * fps)
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
     # Skip the first 'frames_to_skip' frames
     for _ in range(frames_to_skip):
@@ -88,15 +92,18 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
 
         print("Starting frame capture")
         frame_count = frames_to_skip  # Start counting frames from here
+        last_timestamp = max(0.0, (frame_count - 1) / fps)
         try:
             while cap.isOpened() and not stop_event.is_set():
                 ret, frame = cap.read()
                 if not ret:
                     print("No more frames to capture or end of video")
                     break
-                resized_frame = cv2.resize(frame, (1920, 1080))
-
-                frame_queue.put((frame_count, resized_frame))
+                timestamp = float(cap.get(cv2.CAP_PROP_POS_MSEC)) / 1000.0
+                if not np.isfinite(timestamp) or timestamp <= last_timestamp:
+                    timestamp = last_timestamp + 1.0 / fps
+                last_timestamp = timestamp
+                frame_queue.put((frame_count, timestamp, frame))
                 frame_count += 1
         except Exception as e:
             print(f"Error in frame capture: {e}")
@@ -118,8 +125,8 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
                     if frame_batch:
                         process_batch(frame_batch)
                     break
-                frame_count, frame = item
-                frame_batch.append((frame_count, frame))
+                frame_count, timestamp, frame = item
+                frame_batch.append((frame_count, timestamp, frame))
 
                 if len(frame_batch) == batch_size:
                     process_batch(frame_batch)
@@ -132,17 +139,18 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
         processed_queue.put(None)  # Signal end of processing
         print("Frame processing complete")
 
-    def process_batch(batch: List[Tuple[int, np.ndarray]]) -> None:
+    def process_batch(batch: List[Tuple[int, float, np.ndarray]]) -> None:
         """
         Process a batch of frames and put results in the processed queue.
 
         Args:
             batch (List[Tuple[int, np.ndarray]]): List of tuples containing frame count and frame data.
         """
-        frames = [frame for _, frame in batch]
+        frames = [frame for _, _, frame in batch]
+        timestamps = [timestamp for _, timestamp, _ in batch]
         try:
-            processed_batch = processor.process(frames, fps)
-            for (frame_count, _), processed_frame in zip(batch, processed_batch):
+            processed_batch = processor.process(frames, fps, timestamps)
+            for (frame_count, _, _), processed_frame in zip(batch, processed_batch):
                 processed_queue.put((frame_count, processed_frame))
         except Exception as e:
             print(f"Error processing batch: {e}")
@@ -178,9 +186,6 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
         if preview:
             cv2.destroyAllWindows()
         print("Frame display complete")
-
-    width = 1920
-    height = 1080
 
     with tempfile.TemporaryDirectory() as temp_dir:
         try:
