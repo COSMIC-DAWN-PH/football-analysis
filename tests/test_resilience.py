@@ -6,6 +6,7 @@ from annotation.projection_annotator import ProjectionAnnotator
 from ball_to_player_assignment import BallToPlayerAssigner
 from club_assignment import Club
 from position_mappers import ObjectPositionMapper
+from position_mappers import PitchGeometry
 
 
 class ResilienceTests(unittest.TestCase):
@@ -14,7 +15,7 @@ class ResilienceTests(unittest.TestCase):
         self.club2 = Club("two", (0, 0, 255), (255, 255, 0))
 
     def test_mapping_waits_for_enough_keypoints(self) -> None:
-        mapper = ObjectPositionMapper(np.zeros((32, 2), dtype=np.float32))
+        mapper = ObjectPositionMapper(PitchGeometry(105, 68))
         tracks = {
             "keypoints": {},
             "object": {
@@ -24,7 +25,7 @@ class ResilienceTests(unittest.TestCase):
                 "referee": {},
             },
         }
-        mapped = mapper.map(tracks)
+        mapped = mapper.map(tracks, np.zeros((1080, 1920, 3), dtype=np.uint8), 0.0)
         self.assertNotIn("projection", mapped["object"]["player"][1])
 
     def test_ball_assignment_skips_unprojected_ball(self) -> None:

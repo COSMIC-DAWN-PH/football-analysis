@@ -1,65 +1,68 @@
-from .abstract_mapper import AbstractMapper
-from .homography import get_homography, apply_homography, HomographySmoother
-from utils.bbox_utils import get_feet_pos
+from __future__ import annotations
 
+from typing import Mapping, Optional
+
+import cv2
 import numpy as np
 
+from .abstract_mapper import AbstractMapper
+from .camera_calibrator import CalibrationResult, DynamicCameraCalibrator
+from .pitch_geometry import PitchGeometry
+from utils.bbox_utils import get_bbox_center, get_feet_pos
+
+
 class ObjectPositionMapper(AbstractMapper):
-    """
-    A class to map object positions from detected keypoints to a top-down view.
+    """Map tracked image objects to stable metric pitch coordinates."""
 
-    This class implements the mapping of detected objects to their corresponding
-    positions in a top-down representation based on the homography obtained from 
-    detected keypoints.
-    """
-
-    def __init__(self, top_down_keypoints: np.ndarray, alpha: float = 0.9) -> None:
-        """
-        Initializes the ObjectPositionMapper.
-
-        Args:
-            top_down_keypoints (np.ndarray): An array of shape (n, 2) containing the top-down keypoints.
-            alpha (float): Smoothing factor for homography smoothing.
-        """
+    def __init__(
+        self,
+        geometry: PitchGeometry,
+        display_size: tuple[int, int] = (528, 352),
+    ) -> None:
         super().__init__()
-        self.top_down_keypoints = top_down_keypoints
-        self.homography_smoother = HomographySmoother(alpha=alpha)
+        self.geometry = geometry
+        self.display_size = display_size
+        self.calibrator = DynamicCameraCalibrator(geometry)
+        self.last_calibration = CalibrationResult(image_to_pitch=None)
 
-    def map(self, detection: dict) -> dict:
-        """Maps the detection data to their positions in the top-down view.
-
-        This method retrieves keypoints and object information from the detection data,
-        computes the homography matrix, smooths it over frames, and projects the foot positions
-        of detected objects.
-
-        Args:
-            detection (dict): The detection data containing keypoints and object information.
-
-        Returns:
-            dict: The detection data with projected positions added.
-        """
+    def map(
+        self,
+        detection: dict,
+        frame: np.ndarray,
+        timestamp_seconds: float,
+        keypoint_confidences: Optional[Mapping[int, float]] = None,
+    ) -> dict:
         detection = detection.copy()
-        
-        keypoints = detection['keypoints']
-        object_data = detection['object']
-
-        if not object_data:
+        keypoints = detection.get("keypoints", {})
+        object_data = detection.get("object", {})
+        self.last_calibration = self.calibrator.update(
+            frame, keypoints, keypoint_confidences, timestamp_seconds
+        )
+        detection["calibration"] = self.last_calibration
+        homography = self.last_calibration.image_to_pitch
+        if homography is None:
             return detection
 
-        smoothed_H = self.homography_smoother.smoothed_H
-        if len(keypoints) >= 4:
-            H = get_homography(keypoints, self.top_down_keypoints)
-            if H is not None:
-                smoothed_H = self.homography_smoother.smooth(H)
-
-        if smoothed_H is None:
-            return detection
-
-        for _, object_info in object_data.items():
-            for _, track_info in object_info.items():
-                bbox = track_info['bbox']
-                feet_pos = get_feet_pos(bbox)  # Get the foot position
-                projected_pos = apply_homography(feet_pos, smoothed_H)  # Apply the smoothed homography function
-                track_info['projection'] = projected_pos  # Add the projection to the track info
-
+        for object_type, tracks in object_data.items():
+            for track_info in tracks.values():
+                bbox = track_info.get("bbox")
+                if bbox is None:
+                    continue
+                if object_type == "ball":
+                    anchor = get_bbox_center(bbox)
+                else:
+                    anchor = get_feet_pos(bbox)
+                source = np.asarray(anchor, dtype=np.float32).reshape(1, 1, 2)
+                position = cv2.perspectiveTransform(source, homography).reshape(2)
+                metric_position = (float(position[0]), float(position[1]))
+                if not self.geometry.contains(metric_position):
+                    continue
+                track_info["position_m"] = metric_position
+                track_info["projection"] = self.geometry.to_display(
+                    metric_position, *self.display_size
+                )
         return detection
+
+    def reset(self) -> None:
+        self.calibrator.reset()
+        self.last_calibration = CalibrationResult(image_to_pitch=None)

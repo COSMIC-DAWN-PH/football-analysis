@@ -15,7 +15,8 @@ class TracksJsonWriter(AbstractWriter):
     """
 
     def __init__(self, save_dir: str = '', object_fname: str = 'object_tracks', 
-                 keypoints_fname: str = 'keypoint_tracks') -> None:
+                 keypoints_fname: str = 'keypoint_tracks',
+                 calibration_fname: str = 'calibration_tracks') -> None:
         """
         Initializes the TracksJsonWriter.
 
@@ -28,9 +29,12 @@ class TracksJsonWriter(AbstractWriter):
         self.save_dir = save_dir
         self.obj_path = os.path.join(self.save_dir, f'{object_fname}.jsonl')
         self.kp_path = os.path.join(self.save_dir, f'{keypoints_fname}.jsonl')
+        self.calibration_path = os.path.join(self.save_dir, f'{calibration_fname}.jsonl')
 
         if os.path.exists(save_dir):
-            self._remove_existing_files(files=[self.kp_path, self.obj_path]) 
+            self._remove_existing_files(
+                files=[self.kp_path, self.obj_path, self.calibration_path]
+            )
         else:
             os.makedirs(save_dir)
     
@@ -41,6 +45,9 @@ class TracksJsonWriter(AbstractWriter):
     def get_keypoints_tracks_path(self) -> str:
         """Returns the path for the keypoint tracks JSON file."""
         return self.kp_path
+
+    def get_calibration_tracks_path(self) -> str:
+        return self.calibration_path
 
     def write(self, filename: str, tracks: Any) -> None:
         """Write tracks to a JSON file.

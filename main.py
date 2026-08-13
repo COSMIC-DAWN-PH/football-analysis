@@ -1,13 +1,12 @@
 import argparse
 from pathlib import Path
 
-import numpy as np
-
 from annotation import FootballVideoProcessor
 from ball_to_player_assignment import BallToPlayerAssigner
 from club_assignment import Club, ClubAssigner
 from tracking import KeypointsTracker, ObjectTracker
 from utils import process_video
+from position_mappers import PitchGeometry
 
 
 DEFAULT_OBJECT_MODEL = Path("models/weights/object-detection_openvino_model_fp16")
@@ -50,6 +49,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--object-model", type=Path, default=DEFAULT_OBJECT_MODEL)
     parser.add_argument("--keypoints-model", type=Path, default=DEFAULT_KEYPOINTS_MODEL)
     parser.add_argument("--field-image", type=Path, default=DEFAULT_FIELD_IMAGE)
+    parser.add_argument(
+        "--pitch-length-m",
+        type=float,
+        required=True,
+        help="Measured touchline length of this pitch in metres",
+    )
+    parser.add_argument(
+        "--pitch-width-m",
+        type=float,
+        required=True,
+        help="Measured goal-line width of this pitch in metres",
+    )
     parser.add_argument("--tracks-dir", type=Path, default=Path("output_videos"))
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--skip-seconds", type=int, default=0)
@@ -122,26 +133,17 @@ def main(argv: list[str] | None = None) -> None:
     club_assigner = ClubAssigner(club1, club2)
     ball_player_assigner = BallToPlayerAssigner(club1, club2)
 
-    top_down_keypoints = np.array(
-        [
-            [0, 0], [0, 57], [0, 122], [0, 229], [0, 293], [0, 351],
-            [32, 122], [32, 229], [64, 176],
-            [96, 57], [96, 122], [96, 229], [96, 293],
-            [263, 0], [263, 122], [263, 229], [263, 351],
-            [431, 57], [431, 122], [431, 229], [431, 293],
-            [463, 176], [495, 122], [495, 229],
-            [527, 0], [527, 57], [527, 122], [527, 229], [527, 293], [527, 351],
-            [210, 176], [317, 176],
-        ],
-        dtype=np.float32,
-    )
+    try:
+        pitch_geometry = PitchGeometry(args.pitch_length_m, args.pitch_width_m)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     processor = FootballVideoProcessor(
         obj_tracker,
         kp_tracker,
         club_assigner,
         ball_player_assigner,
-        top_down_keypoints,
+        pitch_geometry,
         field_img_path=str(args.field_image),
         save_tracks_dir=str(args.tracks_dir),
         draw_frame_num=True,
