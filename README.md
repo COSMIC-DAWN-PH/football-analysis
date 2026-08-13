@@ -183,10 +183,8 @@ Create the calibration artifacts with:
 .\.venv\Scripts\python.exe -m calibration pitch --video input_videos\match.mp4 --frame 0 --pitch-points "0,0;52.5,0;105,0;105,68;52.5,68;0,68" --output calibration-data\pitch_anchors.json
 ```
 
-The remaining workflow is split into two authoritative documents:
-
-- [`plan/MANUAL_ACTIONS.md`](plan/MANUAL_ACTIONS.md) — user-provided captures, labels, reference data, and exact drop locations.
-- [`plan/SOFTWARE_NEXT_STEPS.md`](plan/SOFTWARE_NEXT_STEPS.md) — software work queue, generated outputs, promotion gates, and acceptance criteria.
+Project-specific capture and rollout checklists may be kept locally under
+`plan/`; that directory is intentionally excluded from release commits.
 
 ## Outputs
 
