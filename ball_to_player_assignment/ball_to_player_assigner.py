@@ -94,7 +94,9 @@ class BallToPlayerAssigner:
             self.ball_lost_frame = current_frame
             
             for ball_key, ball_data in tracks['ball'].items():
-                ball_pos = ball_data['projection']  
+                ball_pos = ball_data.get('projection')
+                if ball_pos is None:
+                    continue
                 ball_bbox_center = get_bbox_center(ball_data['bbox'])  
 
                 is_near_penalty_point = False
@@ -118,7 +120,9 @@ class BallToPlayerAssigner:
 
             for ball_key, ball_pos in valid_ball_tracks:
                 for player_id, player in players.items():
-                    player_pos = player['projection']
+                    player_pos = player.get('projection')
+                    if player_pos is None:
+                        continue
                     dis = point_distance(ball_pos, player_pos)
 
                     if dis <= min_dis:

@@ -1,13 +1,14 @@
 from abc import ABC, abstractmethod
 from ultralytics import YOLO
 import torch
+from pathlib import Path
 from typing import Any, Dict, List
 from ultralytics.engine.results import Results
 import numpy as np
 
 class AbstractTracker(ABC):
 
-    def __init__(self, model_path: str, conf: float = 0.1) -> None:
+    def __init__(self, model_path: str, conf: float = 0.1, task: str | None = None) -> None:
         """
         Load the model from the given path and set the confidence threshold.
 
@@ -16,8 +17,9 @@ class AbstractTracker(ABC):
             conf (float): Confidence threshold for detections.
         """
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = YOLO(model_path)
-        self.model.to(device)
+        self.model = YOLO(model_path, task=task)
+        if Path(model_path).is_file():
+            self.model.to(device)
         self.conf = conf  # Set confidence threshold
         self.cur_frame = 0  # Initialize current frame counter
 

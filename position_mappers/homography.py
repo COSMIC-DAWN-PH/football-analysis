@@ -1,6 +1,6 @@
 import cv2
 import numpy as np
-from typing import Tuple, List
+from typing import Tuple, List, Optional
 
 class HomographySmoother:
     def __init__(self, alpha: float = 0.9):
@@ -32,7 +32,7 @@ class HomographySmoother:
 
         return self.smoothed_H
 
-def get_homography(keypoints: dict, top_down_keypoints: np.ndarray) -> np.ndarray:
+def get_homography(keypoints: dict, top_down_keypoints: np.ndarray) -> Optional[np.ndarray]:
     """
     Compute the homography matrix between detected keypoints and top-down keypoints.
 
@@ -51,7 +51,7 @@ def get_homography(keypoints: dict, top_down_keypoints: np.ndarray) -> np.ndarra
         kps.append(keypoints[key])
         proj_kps.append(top_down_keypoints[key])
 
-    def _compute_homography(src_points: np.ndarray, dst_points: np.ndarray) -> np.ndarray:
+    def _compute_homography(src_points: np.ndarray, dst_points: np.ndarray) -> Optional[np.ndarray]:
         """
         Compute a single homography matrix between source and destination points.
 
@@ -66,7 +66,7 @@ def get_homography(keypoints: dict, top_down_keypoints: np.ndarray) -> np.ndarra
         dst_points = np.array(dst_points, dtype=np.float32)
         h, _ = cv2.findHomography(src_points, dst_points)
 
-        return h.astype(np.float32)
+        return h.astype(np.float32) if h is not None else None
 
     H = _compute_homography(np.array(kps), np.array(proj_kps))
 

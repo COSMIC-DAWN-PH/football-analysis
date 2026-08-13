@@ -29,6 +29,7 @@ class ClubAssigner:
             club2.name: club2.goalkeeper_jersey_color
         }
         self.kmeans = KMeans(n_clusters=2, init='k-means++', n_init=10, random_state=42)
+        self.club_by_track: Dict[Tuple[str, int], str] = {}
 
         # Saving images for analysis
         self.images_to_save = images_to_save
@@ -187,9 +188,13 @@ class ClubAssigner:
 
         for track_type in ['goalkeeper', 'player']:
             for player_id, track in tracks[track_type].items():
-                bbox = track['bbox']
-                is_goalkeeper = (track_type == 'goalkeeper')
-                club, _ = self.get_player_club(frame, bbox, player_id, is_goalkeeper)
+                cache_key = (track_type, player_id)
+                club = self.club_by_track.get(cache_key)
+                if club is None:
+                    bbox = track['bbox']
+                    is_goalkeeper = (track_type == 'goalkeeper')
+                    club, _ = self.get_player_club(frame, bbox, player_id, is_goalkeeper)
+                    self.club_by_track[cache_key] = club
                 
                 tracks[track_type][player_id]['club'] = club
                 tracks[track_type][player_id]['club_color'] = self.club_colors[club]

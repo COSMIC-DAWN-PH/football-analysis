@@ -26,8 +26,8 @@ class TracksJsonWriter(AbstractWriter):
         """
         super().__init__()
         self.save_dir = save_dir
-        self.obj_path = os.path.join(self.save_dir, f'{object_fname}.json')
-        self.kp_path = os.path.join(self.save_dir, f'{keypoints_fname}.json')
+        self.obj_path = os.path.join(self.save_dir, f'{object_fname}.jsonl')
+        self.kp_path = os.path.join(self.save_dir, f'{keypoints_fname}.jsonl')
 
         if os.path.exists(save_dir):
             self._remove_existing_files(files=[self.kp_path, self.obj_path]) 
@@ -45,7 +45,8 @@ class TracksJsonWriter(AbstractWriter):
     def write(self, filename: str, tracks: Any) -> None:
         """Write tracks to a JSON file.
 
-        If the file already exists, new tracks are appended.
+        Each frame is appended as one compact JSON line. This keeps long videos
+        linear-time and avoids re-reading and rewriting the full file per frame.
 
         Args:
             filename (str): The name of the file to save tracks.
@@ -54,19 +55,9 @@ class TracksJsonWriter(AbstractWriter):
         # Convert all tracks to a serializable format
         serializable_tracks = self._make_serializable(tracks)
 
-        if os.path.exists(filename):
-            # If file exists, load existing data and append new tracks
-            with open(filename, 'r') as f:
-                existing_data = json.load(f)
-            existing_data.append(serializable_tracks)
-            data_to_save = existing_data
-        else:
-            # If file doesn't exist, create a new list with current tracks
-            data_to_save = [serializable_tracks]
-
-        # Write the serializable data to the file
-        with open(filename, 'w') as f:
-            json.dump(data_to_save, f, indent=4)  # Added indent for better readability
+        with open(filename, 'a', encoding='utf-8', newline='\n') as f:
+            json.dump(serializable_tracks, f, ensure_ascii=False, separators=(',', ':'))
+            f.write('\n')
 
     def _make_serializable(self, obj: Any) -> Any:
         """Recursively convert objects to a JSON-serializable format.

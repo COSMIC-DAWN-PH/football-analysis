@@ -50,7 +50,9 @@ class ObjectAnnotator(AbstractAnnotator):
                 elif track == 'referee':
                     frame = self.draw_ellipse(frame, item['bbox'], self.referee_annotation_color, track_id, -1, track)
                 else:
-                    speed = item.get('speed', 0)
+                    # A missing speed means that speed estimation was deliberately
+                    # disabled (for example on a low-FPS tactical sample).
+                    speed = item.get('speed', -1)
                     frame = self.draw_ellipse(frame, item['bbox'], color, track_id, speed, track)
 
                     # If the player has the ball, draw a triangle to indicate it

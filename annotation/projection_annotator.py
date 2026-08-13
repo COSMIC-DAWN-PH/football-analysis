@@ -63,7 +63,9 @@ class ProjectionAnnotator(AbstractAnnotator):
         for class_name, track_data in tracks.items():
             if class_name != 'ball':  # Ball is drawn later
                 for track_id, track_info in track_data.items():
-                    proj_pos = track_info['projection']
+                    proj_pos = track_info.get('projection')
+                    if proj_pos is None:
+                        continue
                     color = track_info.get('club_color', (255, 255, 255))
                     color = rgb_bgr_converter(color)
                     is_dark_color = is_color_dark(color)
@@ -86,7 +88,9 @@ class ProjectionAnnotator(AbstractAnnotator):
 
         if 'ball' in tracks:
             for track_id, track_info in tracks['ball'].items():
-                proj_pos = track_info['projection']
+                proj_pos = track_info.get('projection')
+                if proj_pos is None:
+                    continue
                 self._draw_outline(frame, proj_pos, shape='plus', is_dark=is_color_dark((0, 255, 255)))
                 color = (0, 255, 255)
                 cv2.line(frame, (int(proj_pos[0]) - 10, int(proj_pos[1])), (int(proj_pos[0]) + 10, int(proj_pos[1])), color=color, thickness=6)
@@ -112,9 +116,12 @@ class ProjectionAnnotator(AbstractAnnotator):
         for class_name in ['player', 'goalkeeper']:
             track_data = tracks.get(class_name, {})
             for track_id, track_info in track_data.items():
-                x, y = track_info['projection'][:2]
+                projection = track_info.get('projection')
+                if projection is None:
+                    continue
+                x, y = projection[:2]
                 points.append([x, y])
-                player_colors.append(rgb_bgr_converter(track_info['club_color']))
+                player_colors.append(rgb_bgr_converter(track_info.get('club_color', (255, 255, 255))))
 
         boundary_margin = 1000
         boundary_points = [
@@ -145,4 +152,3 @@ class ProjectionAnnotator(AbstractAnnotator):
 
 
 
-    

@@ -43,11 +43,17 @@ class ObjectPositionMapper(AbstractMapper):
         keypoints = detection['keypoints']
         object_data = detection['object']
 
-        if not keypoints or not object_data:
+        if not object_data:
             return detection
 
-        H = get_homography(keypoints, self.top_down_keypoints)
-        smoothed_H = self.homography_smoother.smooth(H)  # Apply smoothing to the homography matrix
+        smoothed_H = self.homography_smoother.smoothed_H
+        if len(keypoints) >= 4:
+            H = get_homography(keypoints, self.top_down_keypoints)
+            if H is not None:
+                smoothed_H = self.homography_smoother.smooth(H)
+
+        if smoothed_H is None:
+            return detection
 
         for _, object_info in object_data.items():
             for _, track_info in object_info.items():

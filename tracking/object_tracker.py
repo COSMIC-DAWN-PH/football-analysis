@@ -16,7 +16,7 @@ class ObjectTracker(AbstractTracker):
             model_path (str): Model Path.
             conf (float): Confidence threshold for detection.
         """
-        super().__init__(model_path, conf)  # Call the Tracker base class constructor
+        super().__init__(model_path, conf, task='detect')  # Call the Tracker base class constructor
 
         self.ball_conf = ball_conf
         self.classes = ['ball', 'goalkeeper', 'player', 'referee']
@@ -42,7 +42,7 @@ class ObjectTracker(AbstractTracker):
         resized_frames = [self._preprocess_frame(frame) for frame in frames]
 
         # Use YOLOv8's predict method to handle batch inference
-        detections = self.model.predict(resized_frames, conf=self.conf)
+        detections = self.model.predict(resized_frames, conf=self.conf, verbose=False)
 
         return detections  # Batch of detections
 

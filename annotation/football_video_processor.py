@@ -26,7 +26,8 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
     def __init__(self, obj_tracker: ObjectTracker, kp_tracker: KeypointsTracker, 
                  club_assigner: ClubAssigner, ball_to_player_assigner: BallToPlayerAssigner, 
                  top_down_keypoints: np.ndarray, field_img_path: str, 
-                 save_tracks_dir: Optional[str] = None, draw_frame_num: bool = True) -> None:
+                 save_tracks_dir: Optional[str] = None, draw_frame_num: bool = True,
+                 estimate_speed: bool = True, annotate_possession: bool = True) -> None:
         """
         Initializes the video processor with necessary components for tracking, annotations, and saving tracks.
 
@@ -50,6 +51,8 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
         self.projection_annotator = ProjectionAnnotator()
         self.obj_mapper = ObjectPositionMapper(top_down_keypoints)
         self.draw_frame_num = draw_frame_num
+        self.estimate_speed = estimate_speed
+        self.annotate_possession = annotate_possession
         if self.draw_frame_num:
             self.frame_num_annotator = FrameNumberAnnotator() 
 
@@ -114,9 +117,10 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
             )
 
             # Estimate the speed of the tracked objects
-            all_tracks['object'] = self.speed_estimator.calculate_speed(
-                all_tracks['object'], self.frame_num, self.cur_fps
-            )
+            if self.estimate_speed:
+                all_tracks['object'] = self.speed_estimator.calculate_speed(
+                    all_tracks['object'], self.frame_num, self.cur_fps
+                )
             
             # Save tracking information if saving is enabled
             if self.save_tracks_dir:
@@ -160,7 +164,8 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
         combined_frame = self._combine_frame_projection(frame, projection_frame)
 
         # Annotate possession on the combined frame
-        combined_frame = self._annotate_possession(combined_frame)
+        if self.annotate_possession:
+            combined_frame = self._annotate_possession(combined_frame)
 
         return combined_frame
     

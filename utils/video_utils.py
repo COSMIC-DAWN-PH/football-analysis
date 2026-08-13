@@ -41,7 +41,7 @@ def _convert_frames_to_video(frame_dir: str, output_video: str, fps: float, fram
 
 
 def process_video(processor = None, video_source: str = 0, output_video: Optional[str] = "output.mp4", 
-                  batch_size: int = 30, skip_seconds: int = 0) -> None:
+                  batch_size: int = 30, skip_seconds: int = 0, preview: bool = True) -> None:
     """
     Process a video file or stream, capturing, processing, and displaying frames.
 
@@ -51,6 +51,7 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
         output_video (Optional[str], optional): Path to save the output video or None to skip saving.
         batch_size (int, optional): Number of frames to process at once.
         skip_seconds (int, optional): Seconds to skip at the beginning of the video.
+        preview (bool, optional): Display processed frames in an OpenCV window.
     """
     from annotation import AbstractVideoProcessor  # Lazy import
 
@@ -162,18 +163,20 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
                 frame_filename = os.path.join(temp_dir, f"frame_{frame_count:06d}.jpg")
                 cv2.imwrite(frame_filename, processed_frame)
                 
-                cv2.imshow('Football Analysis', processed_frame)
+                if preview:
+                    cv2.imshow('Football Analysis', processed_frame)
 
-                if cv2.waitKey(1) & 0xFF == ord('q'):
-                    print("'q' pressed, initiating shutdown")
-                    stop_event.set()
-                    break
+                    if cv2.waitKey(1) & 0xFF == ord('q'):
+                        print("'q' pressed, initiating shutdown")
+                        stop_event.set()
+                        break
             except queue.Empty:
                 continue
             except Exception as e:
                 print(f"Error displaying frame: {e}")
 
-        cv2.destroyAllWindows()
+        if preview:
+            cv2.destroyAllWindows()
         print("Frame display complete")
 
     width = 1920
@@ -222,7 +225,7 @@ def process_video(processor = None, video_source: str = 0, output_video: Optiona
 
         finally:
             cap.release()
-            cv2.destroyAllWindows()
+            if preview:
+                cv2.destroyAllWindows()
 
     print("Video processing completed. Program will now exit.")
-    os._exit(0)  # Force exit the program

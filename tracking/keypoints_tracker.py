@@ -18,13 +18,13 @@ class KeypointsTracker(AbstractTracker):
             conf (float): Confidence threshold for field detection.
             kp_conf (float): Confidence threshold for keypoints.
         """
-        super().__init__(model_path, conf)  # Call the Tracker base class constructor
+        super().__init__(model_path, conf, task='pose')  # Call the Tracker base class constructor
         self.kp_conf = kp_conf  # Keypoint Confidence Threshold
         self.tracks = []  # Initialize tracks list
         self.cur_frame = 0  # Frame counter initialization
         self.original_size = (1920, 1080)  # Original resolution (1920x1080)
-        self.scale_x = self.original_size[0] / 1280
-        self.scale_y = self.original_size[1] / 1280
+        self.scale_x = 1.0
+        self.scale_y = 1.0
 
     def detect(self, frames: List[np.ndarray]) -> List[Results]:
         """
@@ -36,11 +36,17 @@ class KeypointsTracker(AbstractTracker):
         Returns:
             List[Results]: Detected keypoints for each frame
         """
-        # Adjust contrast before detection for each frame
+        # Keep the original 16:9 geometry. Squashing the frame to 1280x1280 or
+        # histogram-equalizing it substantially reduces keypoint recall on
+        # high-angle consumer footage.
         contrast_adjusted_frames = [self._preprocess_frame(frame) for frame in frames]
 
         # Use YOLOv8's batch predict method
-        detections = self.model.predict(contrast_adjusted_frames, conf=self.conf)
+        detections = self.model.predict(
+            contrast_adjusted_frames,
+            conf=self.conf,
+            verbose=False,
+        )
         return detections
 
     def track(self, detection: Results) -> dict:
@@ -53,6 +59,9 @@ class KeypointsTracker(AbstractTracker):
         Returns:
             dict: Dictionary containing tracks of the frame.
         """
+        if detection.keypoints is None:
+            return {}
+
         detection = sv.KeyPoints.from_ultralytics(detection)
         
         # Check 
@@ -68,8 +77,8 @@ class KeypointsTracker(AbstractTracker):
             i: (coords[0] * self.scale_x, coords[1] * self.scale_y)  # i is the key (index), (x, y) are the values
             for i, (coords, conf) in enumerate(zip(xy, confidence))
             if conf > self.kp_conf
-            and 0 <= coords[0] <= 1280  # Check if x is within bounds
-            and 0 <= coords[1] <= 1280  # Check if y is within bounds
+            and 0 <= coords[0] <= self.original_size[0]
+            and 0 <= coords[1] <= self.original_size[1]
         }
 
         self.tracks.append(detection)
@@ -87,13 +96,7 @@ class KeypointsTracker(AbstractTracker):
         Returns:
             np.ndarray: The resized frame with adjusted contrast.
         """
-        # Adjust contrast
-        frame = self._adjust_contrast(frame)
-        
-        # Resize frame to 1280x1280
-        resized_frame = cv2.resize(frame, (1280, 1280))
-
-        return resized_frame
+        return frame
     
     def _adjust_contrast(self, frame: np.ndarray) -> np.ndarray:
         """
