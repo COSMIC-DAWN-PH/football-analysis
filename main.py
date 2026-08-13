@@ -4,7 +4,7 @@ from pathlib import Path
 from annotation import FootballVideoProcessor
 from ball_to_player_assignment import BallToPlayerAssigner
 from club_assignment import Club, ClubAssigner
-from tracking import KeypointsTracker, ObjectTracker
+from tracking import BallDetector, BallTracker, KeypointsTracker, ObjectTracker
 from utils import process_video
 from position_mappers import PitchGeometry
 
@@ -20,6 +20,11 @@ if not DEFAULT_KEYPOINTS_MODEL.exists():
     DEFAULT_KEYPOINTS_MODEL = Path("models/weights/keypoints-detection_openvino_model")
 if not DEFAULT_KEYPOINTS_MODEL.exists():
     DEFAULT_KEYPOINTS_MODEL = Path("models/weights/keypoints-detection.pt")
+DEFAULT_BALL_MODEL = Path("models/weights/ball-detection_openvino_model_fp16")
+if not DEFAULT_BALL_MODEL.exists():
+    DEFAULT_BALL_MODEL = Path("models/weights/ball-detection_openvino_model")
+if not DEFAULT_BALL_MODEL.exists():
+    DEFAULT_BALL_MODEL = Path("models/weights/ball-detection.pt")
 DEFAULT_FIELD_IMAGE = Path("input_videos/field_2d_v2.png")
 
 
@@ -48,6 +53,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--object-model", type=Path, default=DEFAULT_OBJECT_MODEL)
     parser.add_argument("--keypoints-model", type=Path, default=DEFAULT_KEYPOINTS_MODEL)
+    parser.add_argument("--ball-model", type=Path, default=DEFAULT_BALL_MODEL)
     parser.add_argument("--field-image", type=Path, default=DEFAULT_FIELD_IMAGE)
     parser.add_argument(
         "--pitch-length-m",
@@ -112,7 +118,13 @@ def main(argv: list[str] | None = None) -> None:
 
     _require_paths(
         parser,
-        [args.input, args.object_model, args.keypoints_model, args.field_image],
+        [
+            args.input,
+            args.object_model,
+            args.keypoints_model,
+            args.ball_model,
+            args.field_image,
+        ],
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.tracks_dir.mkdir(parents=True, exist_ok=True)
@@ -121,6 +133,7 @@ def main(argv: list[str] | None = None) -> None:
         model_path=str(args.object_model),
         conf=0.25,
         ball_conf=0.05,
+        include_ball=False,
     )
     kp_tracker = KeypointsTracker(
         model_path=str(args.keypoints_model),
@@ -138,9 +151,14 @@ def main(argv: list[str] | None = None) -> None:
     except ValueError as exc:
         parser.error(str(exc))
 
+    ball_detector = BallDetector(str(args.ball_model))
+    ball_tracker = BallTracker(pitch_geometry)
+
     processor = FootballVideoProcessor(
         obj_tracker,
         kp_tracker,
+        ball_detector,
+        ball_tracker,
         club_assigner,
         ball_player_assigner,
         pitch_geometry,

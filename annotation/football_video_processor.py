@@ -7,7 +7,7 @@ from position_mappers import ObjectPositionMapper, PitchGeometry
 from speed_estimation import SpeedEstimator
 from .frame_number_annotator import FrameNumberAnnotator
 from file_writing import TracksJsonWriter
-from tracking import ObjectTracker, KeypointsTracker
+from tracking import BallDetector, BallTracker, ObjectTracker, KeypointsTracker
 from club_assignment import ClubAssigner
 from ball_to_player_assignment import BallToPlayerAssigner
 from utils import rgb_bgr_converter
@@ -23,7 +23,8 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
     and adds various annotations.
     """
 
-    def __init__(self, obj_tracker: ObjectTracker, kp_tracker: KeypointsTracker, 
+    def __init__(self, obj_tracker: ObjectTracker, kp_tracker: KeypointsTracker,
+                 ball_detector: BallDetector, ball_tracker: BallTracker,
                  club_assigner: ClubAssigner, ball_to_player_assigner: BallToPlayerAssigner, 
                  pitch_geometry: PitchGeometry, field_img_path: str,
                  save_tracks_dir: Optional[str] = None, draw_frame_num: bool = True,
@@ -45,6 +46,8 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
         self.obj_tracker = obj_tracker
         self.obj_annotator = ObjectAnnotator()
         self.kp_tracker = kp_tracker
+        self.ball_detector = ball_detector
+        self.ball_tracker = ball_tracker
         self.kp_annotator = KeypointsAnnotator()
         self.club_assigner = club_assigner
         self.ball_to_player_assigner = ball_to_player_assigner
@@ -102,12 +105,19 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
         # Detect objects and keypoints in all frames
         batch_obj_detections = self.obj_tracker.detect(frames)
         batch_kp_detections = self.kp_tracker.detect(frames)
+        batch_ball_candidates = self.ball_detector.detect(frames)
 
         processed_frames = []
 
         # Process each frame in the batch
-        for idx, (frame, object_detection, kp_detection, timestamp) in enumerate(
-            zip(frames, batch_obj_detections, batch_kp_detections, timestamps)
+        for idx, (frame, object_detection, kp_detection, ball_candidates, timestamp) in enumerate(
+            zip(
+                frames,
+                batch_obj_detections,
+                batch_kp_detections,
+                batch_ball_candidates,
+                timestamps,
+            )
         ):
             
             # Track detected objects and keypoints
@@ -130,11 +140,27 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
             if not calibration.valid:
                 self.kp_tracker.request_detection()
 
+            ball_tracks = self.ball_tracker.update(
+                ball_candidates,
+                float(timestamp),
+                calibration,
+                all_tracks["object"],
+                frame.shape,
+            )
+            for ball in ball_tracks.values():
+                position = ball.get("position_m")
+                if position is not None:
+                    ball["projection"] = self.obj_mapper.geometry.to_display(
+                        position, *self.obj_mapper.display_size
+                    )
+            all_tracks["object"]["ball"] = ball_tracks
+
             # Assign the ball to the closest player and calculate speed
             all_tracks['object'], _ = self.ball_to_player_assigner.assign(
                 all_tracks['object'], self.frame_num,
                 all_tracks['keypoints'].get(8, None),  # keypoint for player 1
-                all_tracks['keypoints'].get(24, None)  # keypoint for player 2
+                all_tracks['keypoints'].get(24, None),  # keypoint for player 2
+                timestamp_seconds=float(timestamp),
             )
 
             # Estimate the speed of the tracked objects
