@@ -34,7 +34,7 @@ def main() -> int:
     parser.add_argument(
         "--load-models",
         action="store_true",
-        help="Also load both YOLO checkpoints and validate their metadata",
+        help="Also load the runtime YOLO checkpoints and validate their metadata",
     )
     args = parser.parse_args()
 
@@ -75,6 +75,24 @@ def main() -> int:
             ok = False
         else:
             print(f"OK: keypoint shape {keypoint_shape}")
+
+        ball_candidates = (
+            Path("models/weights/ball-detection_openvino_model_fp16"),
+            Path("models/weights/ball-detection_openvino_model"),
+            Path("models/weights/ball-detection.pt"),
+        )
+        ball_path = next((path for path in ball_candidates if path.exists()), None)
+        if ball_path is None:
+            print("MISSING: dedicated ball model")
+            ok = False
+        else:
+            ball_model = YOLO(str(ball_path), task="detect")
+            ball_names = [ball_model.names[index] for index in sorted(ball_model.names)]
+            if ball_names != ["ball"]:
+                print(f"INCOMPATIBLE ball classes: {ball_names}")
+                ok = False
+            else:
+                print(f"OK: ball classes {ball_names} ({ball_path})")
 
     print("Setup is ready." if ok else "Setup needs attention.")
     return 0 if ok else 1

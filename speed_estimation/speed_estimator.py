@@ -11,7 +11,7 @@ class SpeedEstimator:
 
     def __init__(
         self,
-        window_seconds: float = 0.6,
+        window_seconds: float = 0.5,
         minimum_span_seconds: float = 0.4,
         minimum_samples: int = 6,
         maximum_gap_seconds: float = 0.25,

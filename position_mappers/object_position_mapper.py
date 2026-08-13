@@ -55,7 +55,7 @@ class ObjectPositionMapper(AbstractMapper):
                 source = np.asarray(anchor, dtype=np.float32).reshape(1, 1, 2)
                 position = cv2.perspectiveTransform(source, homography).reshape(2)
                 metric_position = (float(position[0]), float(position[1]))
-                if not self.geometry.contains(metric_position):
+                if not self.geometry.contains(metric_position, margin_m=0.0):
                     continue
                 track_info["position_m"] = metric_position
                 track_info["projection"] = self.geometry.to_display(

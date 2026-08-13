@@ -10,6 +10,7 @@
 - 加速后端：OpenVINO FP16（可由 Intel CPU / Arc GPU / NPU 自动选择）
 - 目标检测权重：公开兼容 YOLO11m，4 类顺序为 `ball / goalkeeper / player / referee`
 - 球场关键点权重：公开兼容 YOLOv8x-pose，32 个关键点
+- 专用足球权重：单类 `ball` OpenVINO FP16 / OpenVINO / PT 自动回退
 - 球场底图：来自上游 `mradovic38/football-analysis`
 
 ## 先检查
@@ -27,6 +28,8 @@
 .\.venv\Scripts\python.exe main.py `
   --input input_videos\match.mp4 `
   --output output_videos\match-analysis.mp4 `
+  --tracks-dir output_videos\match-tracks `
+  --pitch-length-m 105 --pitch-width-m 68 `
   --batch-size 1 `
   --club1-name Red --club1-player 220,30,30 --club1-goalkeeper 20,20,20 `
   --club2-name Blue --club2-player 30,80,220 --club2-goalkeeper 240,220,30
@@ -48,5 +51,6 @@ Copy-Item config.example.py config.py
 
 - `models/weights/object-detection.pt`
 - `models/weights/keypoints-detection.pt`
+- `models/weights/ball-detection.pt`
 
 替换后 `check_setup.py` 会报告哈希不同，这是预期现象；再检查类别顺序和 32 点结构即可。

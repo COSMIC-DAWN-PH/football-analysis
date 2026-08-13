@@ -61,8 +61,33 @@ class DynamicCalibrationTests(unittest.TestCase):
         )
         propagated = calibrator.update(shifted, {}, {}, 0.1)
         self.assertEqual(propagated.status, "propagated")
+        self.assertGreater(propagated.flow_quality, 0.0)
+        self.assertLess(propagated.quality, first.quality)
         expired = calibrator.update(shifted, {}, {}, 1.2)
         self.assertFalse(expired.valid)
+
+    def test_camera_cut_marks_calibration_for_dependent_state_reset(self) -> None:
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        frame[:] = (0, 180, 0)
+        calibrator = DynamicCameraCalibrator(self.geometry)
+        first = calibrator.update(
+            frame,
+            self._image_points(),
+            {index: 0.9 for index in range(32)},
+            0.0,
+        )
+        self.assertTrue(first.valid)
+        cut_frame = np.zeros_like(frame)
+        cut_frame[:] = (180, 0, 0)
+        after_cut = calibrator.update(
+            cut_frame,
+            self._image_points(),
+            {index: 0.9 for index in range(32)},
+            0.04,
+        )
+        self.assertTrue(after_cut.valid)
+        self.assertTrue(after_cut.reset_required)
+        self.assertEqual(after_cut.status, "detected_reset")
 
 
 class SpeedEstimatorTests(unittest.TestCase):

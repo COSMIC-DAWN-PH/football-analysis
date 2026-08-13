@@ -56,6 +56,19 @@ class KeypointsTracker(AbstractTracker):
 
     def track(self, detection: Optional[Results]) -> dict[int, tuple[float, float]]:
         self.cur_frame += 1
+        return self._map_detection(detection)
+
+    def detect_now(self, frame: np.ndarray) -> dict[int, tuple[float, float]]:
+        """Run an immediate detection when optical flow/calibration has failed."""
+        detection = self.model.predict(
+            [frame], conf=self.conf, imgsz=self.imgsz, verbose=False
+        )[0]
+        self._force_next = False
+        return self._map_detection(detection)
+
+    def _map_detection(
+        self, detection: Optional[Results]
+    ) -> dict[int, tuple[float, float]]:
         self.current_confidences = {}
         if detection is None or detection.keypoints is None:
             return {}

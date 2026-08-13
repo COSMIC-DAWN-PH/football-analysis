@@ -21,7 +21,10 @@ class CalibrationResult:
     span_width_ratio: float = 0.0
     flow_points: int = 0
     flow_inliers: int = 0
+    flow_quality: float = 0.0
+    quality: float = 0.0
     age_seconds: Optional[float] = None
+    reset_required: bool = False
 
     @property
     def valid(self) -> bool:
@@ -69,18 +72,22 @@ class DynamicCameraCalibrator:
 
         self._image_to_pitch: Optional[np.ndarray] = None
         self._last_direct_timestamp: Optional[float] = None
+        self._last_direct_quality = 0.0
         self._previous_gray: Optional[np.ndarray] = None
         self._feature_image_points: Optional[np.ndarray] = None
         self._feature_world_points: Optional[np.ndarray] = None
         self._previous_histogram: Optional[np.ndarray] = None
+        self._abnormal_motion = False
 
     def reset(self) -> None:
         self._image_to_pitch = None
         self._last_direct_timestamp = None
+        self._last_direct_quality = 0.0
         self._previous_gray = None
         self._feature_image_points = None
         self._feature_world_points = None
         self._previous_histogram = None
+        self._abnormal_motion = False
 
     def update(
         self,
@@ -91,18 +98,32 @@ class DynamicCameraCalibrator:
     ) -> CalibrationResult:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         histogram = self._frame_histogram(frame)
+        previous_image_to_pitch = self._image_to_pitch
         direct = self._estimate_direct(keypoints, confidences)
+        self._abnormal_motion = False
         flow = self._estimate_flow(gray)
 
-        cut_likely = False
-        if self._previous_histogram is not None and flow is None:
+        cut_likely = self._abnormal_motion
+        if self._previous_histogram is not None:
             correlation = cv2.compareHist(
                 self._previous_histogram, histogram, cv2.HISTCMP_CORREL
             )
-            cut_likely = correlation < 0.35
+            cut_likely |= correlation < 0.35
+        if (
+            previous_image_to_pitch is not None
+            and direct.valid
+            and self._camera_motion_ratio(
+                previous_image_to_pitch, direct.image_to_pitch, gray.shape
+            )
+            > 0.25
+        ):
+            cut_likely = True
         if cut_likely:
             self._image_to_pitch = None
             self._last_direct_timestamp = None
+            self._last_direct_quality = 0.0
+            self._feature_image_points = None
+            self._feature_world_points = None
             flow = None
 
         result: CalibrationResult
@@ -115,9 +136,14 @@ class DynamicCameraCalibrator:
                     selected.status = "fused"
                     selected.flow_points = flow[2]
                     selected.flow_inliers = flow[3]
+                    selected.flow_quality = flow[3] / flow[2]
             self._image_to_pitch = selected.image_to_pitch
             self._last_direct_timestamp = timestamp_seconds
+            self._last_direct_quality = selected.quality
             selected.age_seconds = 0.0
+            selected.reset_required = cut_likely
+            if cut_likely:
+                selected.status = "detected_reset"
             result = selected
         elif flow is not None and self._last_direct_timestamp is not None:
             age = max(0.0, timestamp_seconds - self._last_direct_timestamp)
@@ -129,6 +155,9 @@ class DynamicCameraCalibrator:
                     keypoints=direct.keypoints,
                     flow_points=flow[2],
                     flow_inliers=flow[3],
+                    flow_quality=flow[3] / flow[2],
+                    quality=self._last_direct_quality
+                    * max(0.0, 1.0 - age / self.max_propagation_seconds),
                     age_seconds=age,
                 )
             else:
@@ -137,6 +166,9 @@ class DynamicCameraCalibrator:
         else:
             self._image_to_pitch = None
             result = direct
+            if cut_likely:
+                result.status = "reset"
+                result.reset_required = True
 
         self._previous_gray = gray
         self._previous_histogram = histogram
@@ -204,6 +236,13 @@ class DynamicCameraCalibrator:
             return result
         result.image_to_pitch = image_to_pitch.astype(np.float32)
         result.status = "detected"
+        error_quality = max(0.0, 1.0 - median_error / self.max_median_error_px)
+        result.quality = float(
+            min(1.0, ratio)
+            * error_quality
+            * min(1.0, length_span / self.min_length_span_ratio)
+            * min(1.0, width_span / self.min_width_span_ratio)
+        )
         return result
 
     def _estimate_flow(
@@ -267,7 +306,46 @@ class DynamicCameraCalibrator:
             return None
         if not np.isfinite(image_to_pitch).all():
             return None
+        if (
+            self._image_to_pitch is not None
+            and self._camera_motion_ratio(
+                self._image_to_pitch, image_to_pitch, gray.shape
+            )
+            > 0.25
+        ):
+            self._abnormal_motion = True
+            return None
         return image_to_pitch.astype(np.float32), image, valid_count, flow_inliers
+
+    @staticmethod
+    def _camera_motion_ratio(
+        previous_image_to_pitch: np.ndarray,
+        current_image_to_pitch: np.ndarray,
+        image_shape: tuple[int, int],
+    ) -> float:
+        height, width = image_shape
+        image_points = np.asarray(
+            [
+                [0, 0],
+                [width - 1, 0],
+                [width - 1, height - 1],
+                [0, height - 1],
+                [(width - 1) / 2, (height - 1) / 2],
+            ],
+            dtype=np.float32,
+        )
+        try:
+            current_pitch_to_image = np.linalg.inv(current_image_to_pitch)
+        except np.linalg.LinAlgError:
+            return float("inf")
+        world = cv2.perspectiveTransform(
+            image_points.reshape(-1, 1, 2), previous_image_to_pitch
+        )
+        moved = cv2.perspectiveTransform(world, current_pitch_to_image).reshape(-1, 2)
+        if not np.isfinite(moved).all():
+            return float("inf")
+        diagonal = float(np.hypot(width, height))
+        return float(np.median(np.linalg.norm(moved - image_points, axis=1)) / diagonal)
 
     def _fuse_direct_and_flow(
         self,

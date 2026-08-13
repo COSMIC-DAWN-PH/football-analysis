@@ -1,14 +1,20 @@
 import unittest
+import tempfile
+from pathlib import Path
 
 import numpy as np
+import yaml
 
 from ball_to_player_assignment import BallToPlayerAssigner
 from club_assignment import Club
 from position_mappers import CalibrationResult, PitchGeometry
 from tracking.ball_tracker import (
     BallCandidate,
+    BallDetector,
     BallTracker,
+    ConstantVelocityKalman,
     non_max_suppression,
+    offset_bbox,
     overlapping_tiles,
 )
 
@@ -23,6 +29,9 @@ class BallDetectionUtilitiesTests(unittest.TestCase):
         self.assertEqual(covered_right, 1920)
         self.assertEqual(covered_bottom, 1080)
 
+    def test_tile_bbox_is_mapped_back_to_source_coordinates(self) -> None:
+        self.assertEqual(offset_bbox((10, 20, 14, 25), 900, 400), (910, 420, 914, 425))
+
     def test_nms_keeps_highest_confidence_duplicate(self) -> None:
         candidates = [
             BallCandidate((10, 10, 20, 20), 0.8),
@@ -32,6 +41,23 @@ class BallDetectionUtilitiesTests(unittest.TestCase):
         result = non_max_suppression(candidates, 0.3)
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0].confidence, 0.8)
+
+    def test_kalman_prediction_uses_variable_timestamps(self) -> None:
+        tracker = ConstantVelocityKalman(1.0, 0.01)
+        tracker.correct(np.asarray([0.0, 0.0]), 0.0)
+        tracker.correct(np.asarray([1.0, 0.0]), 0.1)
+        predicted = tracker.predict(0.2)
+        self.assertIsNotNone(predicted)
+        self.assertAlmostEqual(float(predicted[0]), 2.0, delta=0.15)
+
+    def test_dynamic_openvino_export_keeps_requested_inference_size(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            model_dir = Path(temporary)
+            (model_dir / "metadata.yaml").write_text(
+                yaml.safe_dump({"imgsz": [1280, 1280], "args": {"dynamic": True}}),
+                encoding="utf-8",
+            )
+            self.assertIsNone(BallDetector._fixed_export_size(model_dir))
 
 
 class BallTrackerTests(unittest.TestCase):
@@ -69,6 +95,27 @@ class BallTrackerTests(unittest.TestCase):
             (68, 105, 3),
         )
         self.assertEqual(expired, {})
+
+    def test_reset_discards_short_term_prediction(self) -> None:
+        tracker = BallTracker(self.geometry)
+        tracker.update(
+            [BallCandidate((8, 8, 12, 12), 0.8)],
+            0.0,
+            self.calibration,
+            {"player": {}, "goalkeeper": {}},
+            (68, 105, 3),
+        )
+        tracker.reset()
+        self.assertEqual(
+            tracker.update(
+                [],
+                0.1,
+                self.calibration,
+                {"player": {}, "goalkeeper": {}},
+                (68, 105, 3),
+            ),
+            {},
+        )
 
     def test_candidate_outside_metric_pitch_is_rejected(self) -> None:
         tracker = BallTracker(self.geometry)
@@ -112,6 +159,33 @@ class MetricPossessionTests(unittest.TestCase):
         possession = assigner.get_ball_possessions()
         self.assertEqual(len(possession), 1)
         self.assertEqual(possession[-1][0], 1.0)
+
+    def test_low_confidence_prediction_does_not_assign_possession(self) -> None:
+        red = Club("Red", (255, 0, 0), (0, 0, 0))
+        blue = Club("Blue", (0, 0, 255), (255, 255, 0))
+        assigner = BallToPlayerAssigner(red, blue)
+        tracks = {
+            "ball": {
+                1: {
+                    "bbox": [0, 0, 2, 2],
+                    "position_m": (11.0, 10.0),
+                    "observed": False,
+                    "track_confidence": 0.10,
+                }
+            },
+            "player": {
+                7: {
+                    "bbox": [0, 0, 10, 20],
+                    "position_m": (11.5, 10.0),
+                    "club": "Red",
+                }
+            },
+            "goalkeeper": {},
+            "referee": {},
+        }
+        result, player_id = assigner.assign(tracks, 0, timestamp_seconds=0.0)
+        self.assertEqual(player_id, -1)
+        self.assertNotIn("has_ball", result["player"][7])
 
 
 if __name__ == "__main__":

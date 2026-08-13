@@ -58,8 +58,8 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
         if self.draw_frame_num:
             self.frame_num_annotator = FrameNumberAnnotator() 
 
+        self.save_tracks_dir = save_tracks_dir
         if save_tracks_dir:
-            self.save_tracks_dir = save_tracks_dir
             self.writer = TracksJsonWriter(save_tracks_dir)
         
         field_image = cv2.imread(field_img_path)
@@ -73,6 +73,8 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
             pitch_geometry, display_size=(field_image.shape[1], field_image.shape[0])
         )
         self.speed_estimator = SpeedEstimator()
+        self._calibration_invalid_since: Optional[float] = None
+        self._failure_reset_done = False
         
         self.frame_num = 0
 
@@ -137,8 +139,39 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
                 self.kp_tracker.current_confidences,
             )
             calibration = all_tracks["calibration"]
+            initial_reset_required = calibration.reset_required
+            if not calibration.valid and kp_detection is None:
+                retry_keypoints = self.kp_tracker.detect_now(frame)
+                if retry_keypoints:
+                    all_tracks["keypoints"] = retry_keypoints
+                    all_tracks = self.obj_mapper.map(
+                        all_tracks,
+                        frame,
+                        float(timestamp),
+                        self.kp_tracker.current_confidences,
+                    )
+                    calibration = all_tracks["calibration"]
+                    if initial_reset_required:
+                        calibration.reset_required = True
+                        calibration.status = "detected_reset"
             if not calibration.valid:
                 self.kp_tracker.request_detection()
+
+            if calibration.valid:
+                self._calibration_invalid_since = None
+                self._failure_reset_done = False
+            elif self._calibration_invalid_since is None:
+                self._calibration_invalid_since = float(timestamp)
+            prolonged_failure = (
+                self._calibration_invalid_since is not None
+                and float(timestamp) - self._calibration_invalid_since > 1.0
+            )
+            if calibration.reset_required or (
+                prolonged_failure and not self._failure_reset_done
+            ):
+                self.speed_estimator.reset()
+                self.ball_tracker.reset()
+                self._failure_reset_done = True
 
             ball_tracks = self.ball_tracker.update(
                 ball_candidates,
@@ -234,8 +267,12 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
         h_frame, w_frame, _ = frame.shape
         h_proj, w_proj, _ = projection_frame.shape
 
-        # Scale the projection to 70% of its original size
-        scale_proj = 0.7
+        # Keep the overlay inside the native source canvas, including small videos.
+        scale_proj = min(
+            0.7,
+            max(0.05, (w_frame - 20) / w_proj),
+            max(0.05, (h_frame - 20) / h_proj),
+        )
         new_w_proj = int(w_proj * scale_proj)
         new_h_proj = int(h_proj * scale_proj)
         projection_resized = cv2.resize(projection_frame, (new_w_proj, new_h_proj))

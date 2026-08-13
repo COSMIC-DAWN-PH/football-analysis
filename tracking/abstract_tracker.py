@@ -35,6 +35,8 @@ class AbstractTracker(ABC):
         try:
             with metadata_path.open(encoding="utf-8") as handle:
                 metadata = yaml.safe_load(handle) or {}
+            if bool((metadata.get("args") or {}).get("dynamic")):
+                return None
             image_size = metadata.get("imgsz")
             if isinstance(image_size, (list, tuple)) and image_size:
                 return int(max(image_size))

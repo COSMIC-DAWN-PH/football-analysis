@@ -74,6 +74,13 @@ def _bbox_iou(first: tuple[float, ...], second: tuple[float, ...]) -> float:
     return intersection / union if union > 0 else 0.0
 
 
+def offset_bbox(
+    bbox: Iterable[float], offset_x: int, offset_y: int
+) -> tuple[float, float, float, float]:
+    x1, y1, x2, y2 = map(float, bbox)
+    return x1 + offset_x, y1 + offset_y, x2 + offset_x, y2 + offset_y
+
+
 class BallDetector:
     """High-recall ball detector using whole-frame and tiled inference."""
 
@@ -102,7 +109,10 @@ class BallDetector:
             return None
         try:
             with metadata_path.open(encoding="utf-8") as handle:
-                image_size = (yaml.safe_load(handle) or {}).get("imgsz")
+                metadata = yaml.safe_load(handle) or {}
+            if bool((metadata.get("args") or {}).get("dynamic")):
+                return None
+            image_size = metadata.get("imgsz")
             if isinstance(image_size, (list, tuple)):
                 return int(max(image_size))
             return int(image_size) if image_size else None
@@ -138,7 +148,12 @@ class BallDetector:
             result.boxes.conf.cpu().numpy(),
         ):
             class_index = int(class_id)
-            if str(names.get(class_index, "")).lower() != "ball" and class_index != 0:
+            class_name = (
+                names.get(class_index, "")
+                if isinstance(names, dict)
+                else names[class_index] if class_index < len(names) else ""
+            )
+            if str(class_name).lower() != "ball" and class_index != 0:
                 continue
             x1, y1, x2, y2 = map(float, bbox)
             width = x2 - x1
@@ -147,11 +162,79 @@ class BallDetector:
                 continue
             candidates.append(
                 BallCandidate(
-                    bbox=(x1 + offset_x, y1 + offset_y, x2 + offset_x, y2 + offset_y),
+                    bbox=offset_bbox((x1, y1, x2, y2), offset_x, offset_y),
                     confidence=float(confidence),
                 )
             )
         return candidates
+
+
+class ConstantVelocityKalman:
+    """Small timestamp-aware 2D Kalman filter with velocity in its state."""
+
+    def __init__(self, process_variance: float, measurement_variance: float) -> None:
+        self.process_variance = process_variance
+        self.measurement_variance = measurement_variance
+        self.state: Optional[np.ndarray] = None
+        self.covariance: Optional[np.ndarray] = None
+        self.timestamp: Optional[float] = None
+
+    @property
+    def initialized(self) -> bool:
+        return self.state is not None
+
+    def predict(self, timestamp: float) -> Optional[np.ndarray]:
+        if self.state is None or self.covariance is None or self.timestamp is None:
+            return None
+        dt = max(0.0, timestamp - self.timestamp)
+        if dt > 0:
+            transition = np.asarray(
+                [[1, 0, dt, 0], [0, 1, 0, dt], [0, 0, 1, 0], [0, 0, 0, 1]],
+                dtype=np.float64,
+            )
+            dt2, dt3, dt4 = dt * dt, dt**3, dt**4
+            process = self.process_variance * np.asarray(
+                [
+                    [dt4 / 4, 0, dt3 / 2, 0],
+                    [0, dt4 / 4, 0, dt3 / 2],
+                    [dt3 / 2, 0, dt2, 0],
+                    [0, dt3 / 2, 0, dt2],
+                ],
+                dtype=np.float64,
+            )
+            self.state = transition @ self.state
+            self.covariance = transition @ self.covariance @ transition.T + process
+            self.timestamp = timestamp
+        return self.state[:2].copy()
+
+    def correct(self, measurement: np.ndarray, timestamp: float) -> np.ndarray:
+        measurement = np.asarray(measurement, dtype=np.float64).reshape(2)
+        if self.state is None:
+            self.state = np.asarray(
+                [measurement[0], measurement[1], 0.0, 0.0], dtype=np.float64
+            )
+            self.covariance = np.diag(
+                [self.measurement_variance, self.measurement_variance, 1000.0, 1000.0]
+            )
+            self.timestamp = timestamp
+            return measurement.copy()
+
+        self.predict(timestamp)
+        assert self.covariance is not None
+        observation = np.asarray(
+            [[1, 0, 0, 0], [0, 1, 0, 0]], dtype=np.float64
+        )
+        noise = np.eye(2, dtype=np.float64) * self.measurement_variance
+        innovation = measurement - observation @ self.state
+        innovation_covariance = observation @ self.covariance @ observation.T + noise
+        gain = self.covariance @ observation.T @ np.linalg.pinv(innovation_covariance)
+        self.state = self.state + gain @ innovation
+        identity = np.eye(4, dtype=np.float64)
+        joseph = identity - gain @ observation
+        self.covariance = (
+            joseph @ self.covariance @ joseph.T + gain @ noise @ gain.T
+        )
+        return self.state[:2].copy()
 
 
 class BallTracker:
@@ -164,12 +247,9 @@ class BallTracker:
     ) -> None:
         self.geometry = geometry
         self.maximum_prediction_seconds = maximum_prediction_seconds
-        self.last_center: Optional[np.ndarray] = None
-        self.image_velocity = np.zeros(2, dtype=np.float64)
-        self.last_position_m: Optional[np.ndarray] = None
-        self.metric_velocity = np.zeros(2, dtype=np.float64)
+        self.image_filter = ConstantVelocityKalman(400.0, 16.0)
+        self.metric_filter = ConstantVelocityKalman(16.0, 0.25)
         self.last_bbox_size = np.asarray([8.0, 8.0], dtype=np.float64)
-        self.last_timestamp: Optional[float] = None
         self.last_observed_timestamp: Optional[float] = None
         self.track_confidence = 0.0
 
@@ -201,15 +281,14 @@ class BallTracker:
     def _prediction(
         self, timestamp: float, calibration: CalibrationResult
     ) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
-        if self.last_timestamp is None or self.last_center is None:
+        if not self.image_filter.initialized:
             return None, None
-        dt = max(0.0, timestamp - self.last_timestamp)
+        predicted_center = self.image_filter.predict(timestamp)
         predicted_position: Optional[np.ndarray] = None
-        predicted_center = self.last_center + self.image_velocity * dt
-        if self.last_position_m is not None and calibration.image_to_pitch is not None:
-            observed_gap = max(0.0, timestamp - (self.last_observed_timestamp or timestamp))
-            predicted_position = self.last_position_m + self.metric_velocity * observed_gap
-            if self.geometry.contains(tuple(predicted_position), margin_m=3.0):
+        metric_prediction = self.metric_filter.predict(timestamp)
+        if metric_prediction is not None and calibration.image_to_pitch is not None:
+            predicted_position = metric_prediction
+            if self.geometry.contains(tuple(predicted_position), margin_m=0.0):
                 try:
                     pitch_to_image = np.linalg.inv(calibration.image_to_pitch)
                     predicted_center = cv2.perspectiveTransform(
@@ -229,7 +308,7 @@ class BallTracker:
         for candidate in candidates:
             point = np.asarray(candidate.center, dtype=np.float32).reshape(1, 1, 2)
             position = cv2.perspectiveTransform(point, calibration.image_to_pitch).reshape(2)
-            if self.geometry.contains(tuple(position), margin_m=3.0):
+            if self.geometry.contains(tuple(position), margin_m=0.0):
                 result.append((candidate, position.astype(np.float64)))
         return result
 
@@ -254,6 +333,11 @@ class BallTracker:
         best_score = -float("inf")
         for candidate, position in candidates:
             center = np.asarray(candidate.center)
+            bbox_width = candidate.bbox[2] - candidate.bbox[0]
+            bbox_height = candidate.bbox[3] - candidate.bbox[1]
+            maximum_size = max(48.0, min(frame_shape[:2]) * 0.05)
+            if max(bbox_width, bbox_height) > maximum_size:
+                continue
             score = candidate.confidence
             if predicted_center is not None:
                 distance = float(np.linalg.norm(center - predicted_center))
@@ -275,21 +359,13 @@ class BallTracker:
         timestamp: float,
     ) -> dict[int, dict]:
         center = np.asarray(candidate.center, dtype=np.float64)
-        if self.last_center is not None and self.last_observed_timestamp is not None:
-            dt = timestamp - self.last_observed_timestamp
-            if dt > 0:
-                measured_velocity = (center - self.last_center) / dt
-                self.image_velocity = 0.65 * self.image_velocity + 0.35 * measured_velocity
-                if position_m is not None and self.last_position_m is not None:
-                    metric_velocity = (position_m - self.last_position_m) / dt
-                    self.metric_velocity = 0.65 * self.metric_velocity + 0.35 * metric_velocity
-        self.last_center = center
-        self.last_position_m = position_m
+        self.image_filter.correct(center, timestamp)
+        if position_m is not None:
+            self.metric_filter.correct(position_m, timestamp)
         self.last_bbox_size = np.asarray(
             [candidate.bbox[2] - candidate.bbox[0], candidate.bbox[3] - candidate.bbox[1]],
             dtype=np.float64,
         )
-        self.last_timestamp = timestamp
         self.last_observed_timestamp = timestamp
         self.track_confidence = (
             candidate.confidence
@@ -318,7 +394,6 @@ class BallTracker:
             or self.last_observed_timestamp is None
             or timestamp - self.last_observed_timestamp > self.maximum_prediction_seconds
         ):
-            self.last_timestamp = timestamp
             return {}
         height, width = self.last_bbox_size[1], self.last_bbox_size[0]
         x, y = center
@@ -337,8 +412,6 @@ class BallTracker:
         }
         if position_m is not None and calibration.image_to_pitch is not None:
             track["position_m"] = tuple(map(float, position_m))
-        self.last_center = center
-        self.last_timestamp = timestamp
         return {1: track}
 
     def reset(self) -> None:

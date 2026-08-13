@@ -16,10 +16,10 @@ class BallToPlayerAssigner:
         club1: Club,
         club2: Club,
         max_ball_distance: float = 2.0,
-        grace_period: float = 4.0,
-        ball_grace_period: float = 2.0,
+        grace_period: float = 0.5,
+        ball_grace_period: float = 0.5,
         fps: int = 30,
-        minimum_track_confidence: float = 0.10,
+        minimum_track_confidence: float = 0.25,
         **_legacy_options: Any,
     ) -> None:
         self.max_ball_distance = max_ball_distance
@@ -55,7 +55,10 @@ class BallToPlayerAssigner:
         for ball_id, ball in tracks.get("ball", {}).items():
             position = ball.get("position_m")
             confidence = float(ball.get("track_confidence", ball.get("confidence", 0.0)))
-            if position is None or confidence < self.minimum_track_confidence:
+            observed = bool(ball.get("observed", True))
+            if position is None or (
+                not observed and confidence < self.minimum_track_confidence
+            ):
                 continue
             credible_balls.append((ball_id, ball, position, confidence))
             if ball.get("observed", True):
