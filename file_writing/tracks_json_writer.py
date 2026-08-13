@@ -76,8 +76,12 @@ class TracksJsonWriter(AbstractWriter):
             Any: A JSON-serializable representation of the object.
         """
         if isinstance(obj, dict):
-            # Ensure both keys and values are serializable
-            return {str(k): self._make_serializable(v) for k, v in obj.items()}
+            # Internal display-only values must not become analytical raw data.
+            return {
+                str(k): self._make_serializable(v)
+                for k, v in obj.items()
+                if k != "_display_speed"
+            }
         elif isinstance(obj, list):
             # Convert lists recursively
             return [self._make_serializable(v) for v in obj]

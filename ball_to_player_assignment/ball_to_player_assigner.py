@@ -30,6 +30,7 @@ class BallToPlayerAssigner:
         self.possession_tracker = PossessionTracker(club1, club2)
         self.last_player_key: Optional[tuple[str, Any]] = None
         self.last_possessing_team: str | int = -1
+        self.current_possession_team: str | int = -1
         self.last_possession_timestamp: Optional[float] = None
         self.last_observed_ball_timestamp: Optional[float] = None
 
@@ -56,7 +57,8 @@ class BallToPlayerAssigner:
             position = ball.get("position_m")
             confidence = float(ball.get("track_confidence", ball.get("confidence", 0.0)))
             observed = bool(ball.get("observed", True))
-            if position is None or (
+            confirmed = bool(ball.get("track_confirmed", True))
+            if position is None or not confirmed or (
                 not observed and confidence < self.minimum_track_confidence
             ):
                 continue
@@ -95,6 +97,7 @@ class BallToPlayerAssigner:
             player["has_ball"] = True
             self.last_player_key = (player_type, player_id)
             self.last_possessing_team = player["club"]
+            self.current_possession_team = player["club"]
             self.last_possession_timestamp = timestamp
             self.possession_tracker.add_possession(player["club"])
             return tracks, int(player_id)
@@ -109,9 +112,11 @@ class BallToPlayerAssigner:
             player = tracks.get(player_type, {}).get(player_id)
             if player is not None:
                 player["has_ball"] = True
+                self.current_possession_team = self.last_possessing_team
                 self.possession_tracker.add_possession(self.last_possessing_team)
                 return tracks, int(player_id)
 
+        self.current_possession_team = -1
         self.possession_tracker.add_possession(-1)
         if (
             self.last_possession_timestamp is not None
@@ -123,3 +128,6 @@ class BallToPlayerAssigner:
 
     def get_ball_possessions(self) -> Any:
         return self.possession_tracker.possession
+
+    def get_current_possession(self) -> str | int:
+        return self.current_possession_team

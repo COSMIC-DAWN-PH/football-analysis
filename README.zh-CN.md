@@ -13,7 +13,7 @@
 - 使用 32 个米制球场关键点、RANSAC 和 LK 光流动态标定移动镜头。
 - 结合草地遮罩与 K-Means，根据球衣颜色分配球队。
 - 生成球员俯视投影与动态 Voronoi 控制区域。
-- 按真实时间戳鲁棒估计球员速度，可选控球率叠加。
+- 按真实时间戳鲁棒估计球员和足球速度，可选控球率叠加。
 - 按输入原尺寸输出 MP4，并输出目标、关键点和标定 JSONL。
 - 可选战术摘要、热图、时间线和质量指标。
 - 支持无窗口运行与 OpenVINO 模型目录。
@@ -120,8 +120,7 @@ models/weights/ball-detection.pt
 ```powershell
 .\.venv\Scripts\python.exe main.py `
   --input input_videos\match.mp4 `
-  --output output_videos\match-analysis.mp4 `
-  --tracks-dir output_videos\match-tracks `
+  --run-dir output_videos\match `
   --pitch-length-m 105 --pitch-width-m 68 `
   --batch-size 1 `
   --club1-name Red --club1-player 220,30,30 --club1-goalkeeper 20,20,20 `
@@ -134,17 +133,18 @@ models/weights/ball-detection.pt
 | 参数 | 默认值 | 用途 |
 |---|---|---|
 | `--input PATH` | 必填 | 输入比赛视频。 |
-| `--output PATH` | `output_videos/analysis.mp4` | 标注 MP4 路径；父目录会自动创建。 |
+| `--output PATH` | `<run-dir>/<任务名>-analysis.mp4` | 标注 MP4 路径；父目录会自动创建。 |
+| `--run-dir PATH` | `output_videos/<输入名>` | 本次任务的统一输出目录。输入名末尾的 `-input` 或 `_input` 会自动去除。 |
 | `--object-model PATH` | 自动回退 | 目标检测 `.pt` 文件或 OpenVINO 模型目录。 |
 | `--keypoints-model PATH` | 自动回退 | 球场姿态 `.pt` 文件或 OpenVINO 模型目录。 |
 | `--ball-model PATH` | 自动回退 | 独立足球 `.pt` 文件或 OpenVINO 模型目录。 |
 | `--field-image PATH` | `input_videos/field_2d_v2.png` | 俯视投影面板使用的球场底图。 |
 | `--pitch-length-m M` | 必填 | 本场实测边线长度（米）。 |
 | `--pitch-width-m M` | 必填 | 本场实测球门线宽度（米）。 |
-| `--tracks-dir PATH` | `output_videos` | 三个 JSONL 的保存目录。 |
+| `--tracks-dir PATH` | `<run-dir>/raw` | 三个原始 JSONL 的保存目录。 |
 | `--batch-size N` | `1` | 推理批量，最小为 1。 |
 | `--skip-seconds N` | `0` | 跳过源视频开头的秒数，不能为负数。 |
-| `--estimate-speed` / `--no-estimate-speed` | 关闭 | 计算并绘制平滑后的球员速度。 |
+| `--estimate-speed` / `--no-estimate-speed` | 关闭 | 计算并绘制平滑后的球员与足球速度。 |
 | `--annotate-possession` / `--no-annotate-possession` | 关闭 | 绘制模型估算的累计控球率。 |
 | `--preview` / `--no-preview` | 开启 | 显示或关闭 OpenCV 实时窗口。 |
 | `--club1-name NAME` | `Club1` | 第一支球队名称；若要运行当前汇总脚本，应使用 `Red`。 |
@@ -162,12 +162,14 @@ models/weights/ball-detection.pt
 
 主流水线会生成：
 
-- `--output` 指定的标注视频。
-- `--tracks-dir` 下的 `object_tracks.jsonl`。
-- `--tracks-dir` 下的 `keypoint_tracks.jsonl`。
-- `--tracks-dir` 下的 `calibration_tracks.jsonl`。
+- `<run-dir>/<任务名>-analysis.mp4` 标注视频。
+- `<run-dir>/raw/object_tracks.jsonl`。
+- `<run-dir>/raw/keypoint_tracks.jsonl`。
+- `<run-dir>/raw/calibration_tracks.jsonl`。
 
-JSONL 每一行对应一个已处理帧。目标记录可包含 `bbox`、`confidence`、`position_m`、`projection`、`club`、`has_ball` 和 `speed`；足球还有 `observed` 和 `track_confidence`。
+默认情况下，每次任务的分析视频、`raw` 原始轨迹和 `summary` 摘要都会归入同一个任务目录。仍可使用 `--output` 与 `--tracks-dir` 覆盖具体路径。
+
+JSONL 每一行对应一个已处理帧。目标记录可包含 `bbox`、`confidence`、`position_m`、`projection`、`club`、`has_ball` 和 `speed`；足球还有 `observed`、`track_confidence`、`track_segment`、`track_confirmed` 和 `speed_status`。足球只在同一确认轨迹段内通过检测置信度、标定质量和鲁棒运动拟合时写入 `speed`；否则 `speed_status` 为 `pending`，画面显示 `Ball speed: pending`。
 
 `object_tracks.jsonl` 每行包含四类对象。JSON 序列化后，数字 track ID 会变成字符串：
 
@@ -179,7 +181,7 @@ JSONL 每一行对应一个已处理帧。目标记录可包含 `bbox`、`confid
 
 上游旧版 `object_tracks.json` 数组属于历史格式。新版采用 JSON Lines，应逐行解析，不能把整个文件当成一个 JSON 数组。使用同一轨迹目录启动新任务时，程序会先删除该目录中上次生成的两个 JSONL 文件。
 
-输出视频会组合原画面、目标 ID、球队颜色标记、球场关键点和俯视投影。速度文字与控球率图层可分别启用或关闭。
+输出视频会组合原画面、目标 ID、球队颜色标记、球场关键点和俯视投影。有效球员速度会保留显示约 1 秒；足球速度只在当前帧通过可信度门槛时显示，否则标记为 `Ball speed: pending`。控球未确认时会明确标记为 `Unconfirmed`。速度文字与控球率图层可分别启用或关闭。
 
 生成视频保留输入画面尺寸和宽高比，处理后编码为 MP4；不会复制源视频音轨。
 
@@ -191,12 +193,13 @@ JSONL 每一行对应一个已处理帧。目标记录可包含 `bbox`、`confid
 
 ```powershell
 .\.venv\Scripts\python.exe summarize_match.py `
-  --tracks-dir output_videos\match-tracks `
-  --output-dir output_videos\match-summary `
+  --tracks-dir output_videos\match\raw `
   --fps 1 `
   --source input_videos\match.mp4 `
   --pitch-length-m 105 --pitch-width-m 68
 ```
+
+省略 `--output-dir` 时，摘要会自动写入 `output_videos\match\summary`；仍可显式传入该参数覆盖路径。
 
 `--fps` 表示 JSONL 轨迹每秒包含多少个样本，不应盲目填写原视频帧率。例如，若轨迹来自“源视频每秒抽取 1 帧”，应填写 `--fps 1`；逐帧处理时通常才填写源视频 FPS。
 

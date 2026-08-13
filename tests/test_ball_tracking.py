@@ -128,6 +128,87 @@ class BallTrackerTests(unittest.TestCase):
         )
         self.assertEqual(result, {})
 
+    def test_large_candidate_jump_starts_unconfirmed_segment(self) -> None:
+        tracker = BallTracker(self.geometry)
+        players = {"player": {}, "goalkeeper": {}}
+        first = tracker.update(
+            [BallCandidate((8, 8, 12, 12), 0.8)],
+            0.0,
+            self.calibration,
+            players,
+            (1080, 1920, 3),
+        )
+        self.assertEqual(first[1]["track_segment"], 1)
+        jumped = tracker.update(
+            [BallCandidate((48, 8, 52, 12), 0.95)],
+            1 / 30.0,
+            self.calibration,
+            players,
+            (1080, 1920, 3),
+        )
+        self.assertEqual(jumped[1]["track_segment"], 2)
+        self.assertFalse(jumped[1]["track_confirmed"])
+
+    def test_segment_requires_three_continuous_observations(self) -> None:
+        tracker = BallTracker(self.geometry)
+        players = {"player": {}, "goalkeeper": {}}
+        latest = None
+        for frame, center_x in enumerate((10.0, 10.2, 10.4)):
+            latest = tracker.update(
+                [BallCandidate((center_x - 2, 8, center_x + 2, 12), 0.8)],
+                frame / 30.0,
+                self.calibration,
+                players,
+                (1080, 1920, 3),
+            )
+            if frame < 2:
+                self.assertFalse(latest[1]["track_confirmed"])
+        self.assertIsNotNone(latest)
+        self.assertTrue(latest[1]["track_confirmed"])
+        self.assertEqual(latest[1]["track_segment"], 1)
+
+    def test_observation_after_long_gap_starts_new_segment(self) -> None:
+        tracker = BallTracker(self.geometry)
+        players = {"player": {}, "goalkeeper": {}}
+        first = tracker.update(
+            [BallCandidate((8, 8, 12, 12), 0.8)],
+            0.0,
+            self.calibration,
+            players,
+            (1080, 1920, 3),
+        )
+        restarted = tracker.update(
+            [BallCandidate((8, 8, 12, 12), 0.8)],
+            0.2,
+            self.calibration,
+            players,
+            (1080, 1920, 3),
+        )
+        self.assertNotEqual(
+            first[1]["track_segment"], restarted[1]["track_segment"]
+        )
+        self.assertFalse(restarted[1]["track_confirmed"])
+
+    def test_uncalibrated_large_pixel_jump_starts_new_segment(self) -> None:
+        tracker = BallTracker(self.geometry)
+        invalid = CalibrationResult(image_to_pitch=None, status="invalid")
+        players = {"player": {}, "goalkeeper": {}}
+        first = tracker.update(
+            [BallCandidate((98, 98, 102, 102), 0.8)],
+            0.0,
+            invalid,
+            players,
+            (1080, 1920, 3),
+        )
+        jumped = tracker.update(
+            [BallCandidate((398, 98, 402, 102), 0.95)],
+            1 / 30.0,
+            invalid,
+            players,
+            (1080, 1920, 3),
+        )
+        self.assertNotEqual(first[1]["track_segment"], jumped[1]["track_segment"])
+
 
 class MetricPossessionTests(unittest.TestCase):
     def test_ball_within_two_metres_is_assigned_once(self) -> None:
@@ -156,6 +237,7 @@ class MetricPossessionTests(unittest.TestCase):
         result, player_id = assigner.assign(tracks, 0, timestamp_seconds=0.0)
         self.assertEqual(player_id, 7)
         self.assertTrue(result["player"][7]["has_ball"])
+        self.assertEqual(assigner.get_current_possession(), "Red")
         possession = assigner.get_ball_possessions()
         self.assertEqual(len(possession), 1)
         self.assertEqual(possession[-1][0], 1.0)
@@ -171,6 +253,35 @@ class MetricPossessionTests(unittest.TestCase):
                     "position_m": (11.0, 10.0),
                     "observed": False,
                     "track_confidence": 0.10,
+                }
+            },
+            "player": {
+                7: {
+                    "bbox": [0, 0, 10, 20],
+                    "position_m": (11.5, 10.0),
+                    "club": "Red",
+                }
+            },
+            "goalkeeper": {},
+            "referee": {},
+        }
+        result, player_id = assigner.assign(tracks, 0, timestamp_seconds=0.0)
+        self.assertEqual(player_id, -1)
+        self.assertNotIn("has_ball", result["player"][7])
+        self.assertEqual(assigner.get_current_possession(), -1)
+
+    def test_tentative_ball_does_not_assign_possession(self) -> None:
+        red = Club("Red", (255, 0, 0), (0, 0, 0))
+        blue = Club("Blue", (0, 0, 255), (255, 255, 0))
+        assigner = BallToPlayerAssigner(red, blue)
+        tracks = {
+            "ball": {
+                1: {
+                    "bbox": [0, 0, 2, 2],
+                    "position_m": (11.0, 10.0),
+                    "observed": True,
+                    "track_confidence": 0.8,
+                    "track_confirmed": False,
                 }
             },
             "player": {
