@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 from gui_server import ApiProblem, Repository, create_app
-from summarize_match import TOP_DOWN_KEYPOINTS
+from position_mappers import PitchGeometry
 
 
 class ImmediateProcess:
@@ -84,6 +84,7 @@ class GuiTestCase(unittest.TestCase):
         (self.root / "input_videos" / "field_2d_v2.png").write_bytes(b"fake image")
         (self.root / "models" / "weights" / "object-detection.pt").write_bytes(b"object")
         (self.root / "models" / "weights" / "keypoints-detection.pt").write_bytes(b"pose")
+        (self.root / "models" / "weights" / "ball-detection.pt").write_bytes(b"ball")
         (self.root / "gui" / "index.html").write_text("<!doctype html><title>test</title>", encoding="utf-8")
         for script in ("main.py", "check_setup.py", "summarize_match.py"):
             (self.root / script).write_text("", encoding="utf-8")
@@ -109,7 +110,10 @@ class GuiTestCase(unittest.TestCase):
                 "tracks_dir": "output_videos/demo/tracks",
                 "object_model": "models/weights/object-detection.pt",
                 "keypoints_model": "models/weights/keypoints-detection.pt",
+                "ball_model": "models/weights/ball-detection.pt",
                 "field_image": "input_videos/field_2d_v2.png",
+                "pitch_length_m": 105,
+                "pitch_width_m": 68,
                 "batch_size": 2,
                 "skip_seconds": 3,
                 "estimate_speed": True,
@@ -132,9 +136,35 @@ class RepositoryTests(GuiTestCase):
         self.assertIn("--estimate-speed", spec.command)
         self.assertIn("--no-annotate-possession", spec.command)
         self.assertIn("--no-preview", spec.command)
+        self.assertEqual(
+            spec.command[spec.command.index("--ball-model") + 1],
+            "models/weights/ball-detection.pt",
+        )
+        self.assertEqual(spec.command[spec.command.index("--pitch-length-m") + 1], "105.0")
+        self.assertEqual(spec.command[spec.command.index("--pitch-width-m") + 1], "68.0")
         self.assertEqual(spec.command[spec.command.index("--batch-size") + 1], "2")
         self.assertEqual(spec.command[spec.command.index("--club1-player") + 1], "220,30,30")
         self.assertEqual(spec.options["tracks_dir"], "output_videos/demo/tracks")
+        self.assertIn(
+            self.root / "output_videos" / "demo" / "tracks" / "calibration_tracks.jsonl",
+            spec.expected_artifacts,
+        )
+
+    def test_analysis_rejects_invalid_metric_pitch_dimensions(self):
+        payload = self.analysis_payload()
+        payload["options"]["pitch_width_m"] = 40
+        with self.assertRaises(ApiProblem) as problem:
+            self.repository.prepare_job(payload)
+        self.assertIn("40.32", problem.exception.message)
+
+        payload["options"]["pitch_width_m"] = 68
+        payload["options"]["pitch_length_m"] = float("nan")
+        with self.assertRaises(ApiProblem):
+            self.repository.prepare_job(payload)
+
+        payload["options"]["pitch_length_m"] = True
+        with self.assertRaises(ApiProblem):
+            self.repository.prepare_job(payload)
 
     def test_paths_cannot_escape_their_owned_root(self):
         with self.assertRaises(ApiProblem) as problem:
@@ -168,10 +198,13 @@ class RepositoryTests(GuiTestCase):
                 "output_dir": "output_videos/demo/summary",
                 "source": "input_videos/match.mp4",
                 "fps": 25,
+                "pitch_length_m": 105,
+                "pitch_width_m": 68,
             },
         }
         spec = self.repository.prepare_job(payload)
         self.assertEqual(spec.command[spec.command.index("--fps") + 1], "25.0")
+        self.assertEqual(spec.command[spec.command.index("--pitch-length-m") + 1], "105.0")
         payload["options"]["fps"] = 0
         with self.assertRaises(ApiProblem):
             self.repository.prepare_job(payload)
@@ -188,7 +221,11 @@ class ApiTests(GuiTestCase):
         catalog = client.get("/api/catalog")
         self.assertEqual(catalog.status_code, 200)
         self.assertEqual(len(catalog.get_json()["videos"]), 1)
-        self.assertEqual(len(catalog.get_json()["models"]), 2)
+        self.assertEqual(len(catalog.get_json()["models"]), 3)
+        self.assertEqual(
+            catalog.get_json()["defaults"]["ball_model"],
+            "models/weights/ball-detection.pt",
+        )
 
         results = client.get("/api/results").get_json()
         self.assertEqual(results["videos"][0]["path"], "output_videos/clip.mp4")
@@ -263,6 +300,111 @@ class ApiTests(GuiTestCase):
         response = app.test_client().get("/api/catalog", headers={"Host": "attacker.test"})
         self.assertEqual(response.status_code, 403)
 
+        response = app.test_client().post(
+            "/api/videos",
+            data={"video": (io.BytesIO(b"video"), "match.mp4")},
+            content_type="multipart/form-data",
+            headers={"Origin": "https://example.test"},
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_video_upload_preserves_unicode_and_renames_collisions(self):
+        app = create_app(self.root, ImmediateProcess)
+        app.testing = True
+        client = app.test_client()
+
+        first = client.post(
+            "/api/videos",
+            data={"video": (io.BytesIO(b"first video"), "比赛.mp4")},
+            content_type="multipart/form-data",
+        )
+        second = client.post(
+            "/api/videos",
+            data={"video": (io.BytesIO(b"second video"), "比赛.mp4")},
+            content_type="multipart/form-data",
+        )
+        traversal = client.post(
+            "/api/videos",
+            data={"video": (io.BytesIO(b"safe video"), "../outside.mp4")},
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(traversal.status_code, 201)
+        self.assertEqual(first.get_json()["video"]["path"], "input_videos/比赛.mp4")
+        self.assertEqual(second.get_json()["video"]["path"], "input_videos/比赛 (1).mp4")
+        self.assertEqual(traversal.get_json()["video"]["path"], "input_videos/outside.mp4")
+        self.assertEqual((self.root / "input_videos" / "比赛.mp4").read_bytes(), b"first video")
+        self.assertEqual(
+            (self.root / "input_videos" / "比赛 (1).mp4").read_bytes(), b"second video"
+        )
+        self.assertFalse((self.root / "outside.mp4").exists())
+        self.assertEqual(len(client.get("/api/catalog").get_json()["videos"]), 4)
+
+    def test_video_upload_rejects_invalid_files_and_cleans_temporary_data(self):
+        app = create_app(self.root, ImmediateProcess)
+        app.testing = True
+        client = app.test_client()
+
+        unsupported = client.post(
+            "/api/videos",
+            data={"video": (io.BytesIO(b"text"), "notes.txt")},
+            content_type="multipart/form-data",
+        )
+        empty = client.post(
+            "/api/videos",
+            data={"video": (io.BytesIO(b""), "empty.mp4")},
+            content_type="multipart/form-data",
+        )
+        with mock.patch.object(
+            Repository,
+            "_video_metadata",
+            return_value={"fps": None, "frames": None, "duration_seconds": None},
+        ):
+            unreadable = client.post(
+                "/api/videos",
+                data={"video": (io.BytesIO(b"broken"), "broken.mp4")},
+                content_type="multipart/form-data",
+            )
+
+        self.assertEqual(unsupported.status_code, 400)
+        self.assertEqual(unsupported.get_json()["code"], "unsupported_video_format")
+        self.assertEqual(empty.status_code, 400)
+        self.assertEqual(empty.get_json()["code"], "empty_video")
+        self.assertEqual(unreadable.status_code, 400)
+        self.assertEqual(unreadable.get_json()["code"], "invalid_video")
+        temporary_root = self.root / "input_videos" / ".uploads"
+        self.assertTrue(not temporary_root.exists() or not any(temporary_root.iterdir()))
+
+    def test_video_upload_enforces_content_type_and_size_limit(self):
+        app = create_app(self.root, ImmediateProcess)
+        app.testing = True
+        client = app.test_client()
+
+        wrong_type = client.post("/api/videos", json={"video": "match.mp4"})
+        self.assertEqual(wrong_type.status_code, 415)
+        self.assertEqual(wrong_type.get_json()["code"], "multipart_required")
+
+        app.config["MAX_CONTENT_LENGTH"] = 32
+        too_large = client.post(
+            "/api/videos",
+            data={"video": (io.BytesIO(b"x" * 128), "large.mp4")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(too_large.status_code, 413)
+        self.assertEqual(too_large.get_json()["code"], "upload_too_large")
+
+
+class LauncherTests(unittest.TestCase):
+    def test_windows_launcher_uses_crlf_and_ascii(self):
+        launcher = Path(__file__).resolve().parents[1] / "start_gui.cmd"
+        content = launcher.read_bytes()
+        self.assertTrue(content)
+        self.assertNotIn(b"\xef\xbb\xbf", content)
+        self.assertNotIn(b"\n", content.replace(b"\r\n", b""))
+        content.decode("ascii")
+
 
 class SummaryIntegrationTests(unittest.TestCase):
     def test_real_summary_writes_the_complete_artifact_set(self):
@@ -289,7 +431,7 @@ class SummaryIntegrationTests(unittest.TestCase):
                     track_id += 1
             keypoints = {
                 str(index): [float(point[0]), float(point[1])]
-                for index, point in enumerate(TOP_DOWN_KEYPOINTS)
+                for index, point in enumerate(PitchGeometry(105, 68).vertices)
             }
             (tracks / "object_tracks.jsonl").write_text(
                 json.dumps(objects) + "\n", encoding="utf-8"
@@ -310,6 +452,10 @@ class SummaryIntegrationTests(unittest.TestCase):
                     "1",
                     "--source",
                     str(source),
+                    "--pitch-length-m",
+                    "105",
+                    "--pitch-width-m",
+                    "68",
                 ],
                 capture_output=True,
                 text=True,

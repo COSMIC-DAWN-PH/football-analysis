@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -17,6 +19,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from flask import Flask, Response, jsonify, request, send_file
+from werkzeug.exceptions import RequestEntityTooLarge
 
 
 ROOT = Path(__file__).resolve().parent
@@ -44,6 +47,16 @@ SUMMARY_FILENAMES = (
 )
 ACTIVE_STATUSES = {"starting", "running"}
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
+MAX_JSON_BYTES = 1024 * 1024
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024 * 1024
+WINDOWS_RESERVED_NAMES = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
 
 
 class ApiProblem(Exception):
@@ -114,6 +127,7 @@ class Repository:
         self.model_root = (self.root / "models" / "weights").resolve()
         self.output_root = (self.root / "output_videos").resolve()
         self.html_path = self.root / "gui" / "index.html"
+        self.upload_lock = threading.Lock()
 
     @staticmethod
     def _inside(path: Path, root: Path) -> bool:
@@ -159,6 +173,8 @@ class Repository:
             return []
         result = []
         for path in root.rglob("*"):
+            if ".uploads" in path.relative_to(root).parts:
+                continue
             if path.is_file() and path.suffix.lower() in extensions:
                 try:
                     resolved = path.resolve()
@@ -200,6 +216,77 @@ class Repository:
             info.update(self._video_metadata(path))
         return info
 
+    @staticmethod
+    def _video_filename(raw_name: Any) -> tuple[str, str]:
+        if not isinstance(raw_name, str) or not raw_name.strip():
+            raise ApiProblem("请选择要上传的视频", code="missing_video")
+
+        basename = raw_name.replace("\\", "/").rsplit("/", 1)[-1].strip()
+        suffix = Path(basename).suffix.lower()
+        if suffix not in VIDEO_EXTENSIONS:
+            formats = "、".join(sorted(extension.lstrip(".").upper() for extension in VIDEO_EXTENSIONS))
+            raise ApiProblem(
+                f"不支持该视频格式；请选择 {formats}",
+                code="unsupported_video_format",
+            )
+
+        stem = basename[: -len(suffix)]
+        stem = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", stem).strip(" .")
+        stem = stem[:180].rstrip(" .") or "video"
+        if stem.split(".", 1)[0].upper() in WINDOWS_RESERVED_NAMES:
+            stem = f"_{stem}"
+        return stem, suffix
+
+    def _unique_video_path(self, stem: str, suffix: str) -> Path:
+        candidate = self.input_root / f"{stem}{suffix}"
+        index = 1
+        while candidate.exists():
+            candidate = self.input_root / f"{stem} ({index}){suffix}"
+            index += 1
+        return candidate
+
+    def store_video(self, uploaded_file: Any) -> dict[str, Any]:
+        """Validate and atomically store one uploaded video under input_videos."""
+        stem, suffix = self._video_filename(getattr(uploaded_file, "filename", None))
+        self.input_root.mkdir(parents=True, exist_ok=True)
+        temporary_root = self.input_root / ".uploads"
+        temporary_root.mkdir(exist_ok=True)
+        temporary_root = temporary_root.resolve()
+        if not self._inside(temporary_root, self.input_root):
+            raise ApiProblem("上传临时目录不安全", status=500, code="unsafe_upload_directory")
+        temporary_path = temporary_root / f"{uuid.uuid4().hex}{suffix}"
+
+        try:
+            uploaded_file.save(temporary_path)
+            if not temporary_path.is_file() or temporary_path.stat().st_size == 0:
+                raise ApiProblem("上传的视频为空", code="empty_video")
+
+            metadata = self._video_metadata(temporary_path)
+            if all(value is None for value in metadata.values()):
+                raise ApiProblem(
+                    "OpenCV 无法读取该视频，请检查文件是否完整以及编码是否受支持",
+                    code="invalid_video",
+                )
+
+            with self.upload_lock:
+                destination = self._unique_video_path(stem, suffix)
+                os.replace(temporary_path, destination)
+
+            info = self._file_info(destination)
+            info.update(metadata)
+            return info
+        except ApiProblem:
+            raise
+        except OSError as exc:
+            raise ApiProblem(
+                f"保存视频失败：{exc}", status=500, code="upload_failed"
+            ) from exc
+        finally:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
     def catalog(self) -> dict[str, Any]:
         videos = [
             self._file_info(path, include_video_metadata=True)
@@ -232,15 +319,18 @@ class Repository:
             for object_path in self.output_root.rglob("object_tracks.jsonl"):
                 directory = object_path.parent.resolve()
                 keypoint_path = directory / "keypoint_tracks.jsonl"
+                calibration_path = directory / "calibration_tracks.jsonl"
                 if self._inside(directory, self.output_root) and keypoint_path.is_file():
-                    track_dirs.append(
-                        {
-                            "name": directory.name,
-                            "path": self.relative(directory),
-                            "object_size": object_path.stat().st_size,
-                            "keypoint_size": keypoint_path.stat().st_size,
-                        }
-                    )
+                    info = {
+                        "name": directory.name,
+                        "path": self.relative(directory),
+                        "object_size": object_path.stat().st_size,
+                        "keypoint_size": keypoint_path.stat().st_size,
+                        "has_calibration": calibration_path.is_file(),
+                    }
+                    if calibration_path.is_file():
+                        info["calibration_size"] = calibration_path.stat().st_size
+                    track_dirs.append(info)
         track_dirs.sort(key=lambda item: item["path"].lower())
 
         def first_existing(candidates: tuple[str, ...], allowed_root: Path) -> str | None:
@@ -269,6 +359,14 @@ class Repository:
                         "models/weights/keypoints-detection_openvino_model_fp16",
                         "models/weights/keypoints-detection_openvino_model",
                         "models/weights/keypoints-detection.pt",
+                    ),
+                    self.model_root,
+                ),
+                "ball_model": first_existing(
+                    (
+                        "models/weights/ball-detection_openvino_model_fp16",
+                        "models/weights/ball-detection_openvino_model",
+                        "models/weights/ball-detection.pt",
                     ),
                     self.model_root,
                 ),
@@ -348,12 +446,14 @@ class Repository:
 
     @staticmethod
     def _positive_float(value: Any, label: str) -> float:
+        if isinstance(value, bool):
+            raise ApiProblem(f"{label} 必须是数字")
         try:
             result = float(value)
         except (TypeError, ValueError) as exc:
             raise ApiProblem(f"{label} 必须是数字") from exc
-        if result <= 0:
-            raise ApiProblem(f"{label} 必须大于 0")
+        if not math.isfinite(result) or result <= 0:
+            raise ApiProblem(f"{label} 必须是大于 0 的有限数值")
         return result
 
     @staticmethod
@@ -425,6 +525,7 @@ class Repository:
             tracks_dir = self.resolve_path(options.get("tracks_dir"), self.output_root)
             object_model = self._verify_model(options.get("object_model"), "目标检测模型")
             keypoints_model = self._verify_model(options.get("keypoints_model"), "关键点模型")
+            ball_model = self._verify_model(options.get("ball_model"), "足球检测模型")
             field_image = self.resolve_path(
                 options.get("field_image"), self.input_root, must_exist=True, file_only=True
             )
@@ -433,6 +534,12 @@ class Repository:
 
             batch_size = self._integer(options.get("batch_size", 1), "批量大小", 1)
             skip_seconds = self._integer(options.get("skip_seconds", 0), "跳过秒数", 0)
+            pitch_length_m = self._positive_float(options.get("pitch_length_m"), "球场长度")
+            pitch_width_m = self._positive_float(options.get("pitch_width_m"), "球场宽度")
+            if pitch_length_m <= 33:
+                raise ApiProblem("球场长度必须大于 33 米，以容纳标准禁区")
+            if pitch_width_m < 40.32:
+                raise ApiProblem("球场宽度不能小于 40.32 米，以容纳标准禁区")
             estimate_speed = self._bool(options.get("estimate_speed"), False)
             annotate_possession = self._bool(options.get("annotate_possession"), False)
             preview = self._bool(options.get("preview"), False)
@@ -451,6 +558,7 @@ class Repository:
                 output_path,
                 tracks_dir / "object_tracks.jsonl",
                 tracks_dir / "keypoint_tracks.jsonl",
+                tracks_dir / "calibration_tracks.jsonl",
             ]
             self._collision_check(expected, overwrite)
 
@@ -468,8 +576,14 @@ class Repository:
                 rel(object_model),
                 "--keypoints-model",
                 rel(keypoints_model),
+                "--ball-model",
+                rel(ball_model),
                 "--field-image",
                 rel(field_image),
+                "--pitch-length-m",
+                str(pitch_length_m),
+                "--pitch-width-m",
+                str(pitch_width_m),
                 "--tracks-dir",
                 rel(tracks_dir),
                 "--batch-size",
@@ -504,7 +618,10 @@ class Repository:
                 "output": rel(output_path),
                 "object_model": rel(object_model),
                 "keypoints_model": rel(keypoints_model),
+                "ball_model": rel(ball_model),
                 "field_image": rel(field_image),
+                "pitch_length_m": pitch_length_m,
+                "pitch_width_m": pitch_width_m,
                 "tracks_dir": rel(tracks_dir),
                 "batch_size": batch_size,
                 "skip_seconds": skip_seconds,
@@ -542,6 +659,12 @@ class Repository:
             if source.suffix.lower() not in VIDEO_EXTENSIONS:
                 raise ApiProblem("源文件必须是支持的视频格式")
             fps = self._positive_float(options.get("fps", 1), "采样 FPS")
+            pitch_length_m = self._positive_float(options.get("pitch_length_m"), "球场长度")
+            pitch_width_m = self._positive_float(options.get("pitch_width_m"), "球场宽度")
+            if pitch_length_m <= 33:
+                raise ApiProblem("球场长度必须大于 33 米，以容纳标准禁区")
+            if pitch_width_m < 40.32:
+                raise ApiProblem("球场宽度不能小于 40.32 米，以容纳标准禁区")
             expected = [output_dir / filename for filename in SUMMARY_FILENAMES]
             self._collision_check(expected, overwrite)
             normalized_options = {
@@ -549,6 +672,8 @@ class Repository:
                 "output_dir": self.relative(output_dir),
                 "source": self.relative(source),
                 "fps": fps,
+                "pitch_length_m": pitch_length_m,
+                "pitch_width_m": pitch_width_m,
             }
             command = [
                 sys.executable,
@@ -561,6 +686,10 @@ class Repository:
                 str(fps),
                 "--source",
                 normalized_options["source"],
+                "--pitch-length-m",
+                str(pitch_length_m),
+                "--pitch-width-m",
+                str(pitch_width_m),
             ]
             return JobSpec("summary", command, normalized_options, expected)
 
@@ -842,7 +971,7 @@ def create_app(
     repository = Repository(root)
     manager = JobManager(repository, popen_factory)
     app = Flask(__name__)
-    app.config.update(JSON_AS_ASCII=False, MAX_CONTENT_LENGTH=1024 * 1024)
+    app.config.update(JSON_AS_ASCII=False, MAX_CONTENT_LENGTH=MAX_UPLOAD_BYTES)
     app.extensions["football_repository"] = repository
     app.extensions["football_jobs"] = manager
 
@@ -850,6 +979,21 @@ def create_app(
     def handle_api_problem(problem: ApiProblem) -> tuple[Response, int]:
         payload = {"error": problem.message, "code": problem.code, **problem.details}
         return jsonify(payload), problem.status
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def handle_request_too_large(_problem: RequestEntityTooLarge) -> tuple[Response, int]:
+        limit = int(app.config["MAX_CONTENT_LENGTH"])
+        limit_label = f"{limit // (1024 ** 3)} GiB" if limit >= 1024 ** 3 else f"{limit} 字节"
+        return (
+            jsonify(
+                {
+                    "error": f"视频超过 {limit_label} 上传上限",
+                    "code": "upload_too_large",
+                    "max_bytes": limit,
+                }
+            ),
+            413,
+        )
 
     @app.before_request
     def protect_local_writes() -> tuple[Response, int] | None:
@@ -862,8 +1006,17 @@ def create_app(
         expected = f"{request.scheme}://{request.host}"
         if origin and origin.rstrip("/") != expected.rstrip("/"):
             return jsonify({"error": "拒绝跨来源请求", "code": "origin_rejected"}), 403
-        if request.method == "POST" and not request.is_json:
-            return jsonify({"error": "请求必须使用 JSON", "code": "json_required"}), 415
+        if request.method == "POST":
+            if request.path == "/api/videos":
+                if request.mimetype != "multipart/form-data":
+                    return jsonify(
+                        {"error": "视频上传必须使用 multipart/form-data", "code": "multipart_required"}
+                    ), 415
+            else:
+                if request.content_length is not None and request.content_length > MAX_JSON_BYTES:
+                    return jsonify({"error": "JSON 请求过大", "code": "request_too_large"}), 413
+                if not request.is_json:
+                    return jsonify({"error": "请求必须使用 JSON", "code": "json_required"}), 415
         return None
 
     @app.after_request
@@ -888,6 +1041,13 @@ def create_app(
     @app.get("/api/results")
     def results() -> Response:
         return jsonify(repository.results())
+
+    @app.post("/api/videos")
+    def upload_video() -> tuple[Response, int]:
+        uploaded_file = request.files.get("video")
+        if uploaded_file is None:
+            raise ApiProblem("请求中缺少 video 文件字段", code="missing_video")
+        return jsonify({"video": repository.store_video(uploaded_file)}), 201
 
     @app.get("/api/jobs")
     def jobs() -> Response:

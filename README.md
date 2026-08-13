@@ -203,9 +203,9 @@ Start the interface from the repository root:
 .\.venv\Scripts\python.exe gui_server.py
 ```
 
-The server opens `http://127.0.0.1:8765` in the default browser. Use `--no-browser` to suppress automatic opening or `--port PORT` to select another local port. It never listens on an external network interface.
+On Windows, you can also double-click `start_gui.cmd` in the repository root. The server opens `http://127.0.0.1:8765` in the default browser. Do not open `gui/index.html` directly: setup checks and video uploads require the local Python service. Use `--no-browser` to suppress automatic opening or `--port PORT` to select another local port. It never listens on an external network interface.
 
-The GUI intentionally works only with repository-owned directories: put source videos in `input_videos/`, put checkpoints or OpenVINO exports in `models/weights/`, and keep generated artifacts under `output_videos/`. It runs one task at a time to avoid competing model loads, exposes live logs and cancellation, and scans existing output artifacts again after a restart. Existing output targets require an explicit overwrite confirmation.
+The GUI intentionally works only with repository-owned directories: select or drop a source video in the page, or copy it manually into `input_videos/`; put checkpoints or OpenVINO exports in `models/weights/`; and keep generated artifacts under `output_videos/`. The analysis form exposes the dedicated ball model and the measured pitch length/width required by dynamic camera calibration; the same dimensions are carried into tactical-summary jobs. Uploads support MP4, MOV, AVI, MKV, M4V, and WebM up to 20 GiB. A same-name upload receives a numbered filename instead of replacing the existing video. The interface runs one analysis task at a time to avoid competing model loads, exposes live logs and cancellation, and scans existing output artifacts again after a restart. Existing output targets require an explicit overwrite confirmation.
 
 Video analysis can take substantially longer than the source duration on CPU. Closing the browser does not stop a running job while the local server remains open; reopen the page to reconnect to it.
 

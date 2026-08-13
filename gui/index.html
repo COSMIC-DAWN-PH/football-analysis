@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'none'">
+  <link rel="icon" href="data:,">
   <title>Football Analysis · 本地控制台</title>
   <style>
     :root {
@@ -217,6 +218,51 @@
     .notice { padding: 13px 15px; border: 1px solid rgba(255, 202, 106, .22); border-radius: 12px; color: #efdcb3; background: rgba(255, 202, 106, .07); font-size: 13px; line-height: 1.55; }
     .notice.good { border-color: rgba(102, 227, 155, .22); color: #c9f3d8; background: rgba(102, 227, 155, .065); }
 
+    .connection-notice {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      margin-bottom: 20px;
+      padding: 15px 18px;
+      border: 1px solid rgba(255, 127, 127, .38);
+      border-radius: 14px;
+      color: #ffd0d0;
+      background: rgba(255, 127, 127, .09);
+    }
+    .connection-notice[hidden] { display: none; }
+    .connection-notice strong { display: block; margin-bottom: 4px; }
+    .connection-notice span { color: #e7bcbc; font-size: 13px; line-height: 1.5; }
+    .connection-notice a { flex: 0 0 auto; font-weight: 750; }
+
+    .upload-zone {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      min-height: 92px;
+      padding: 17px;
+      border: 1px dashed var(--line-strong);
+      border-radius: 13px;
+      color: var(--muted);
+      background: rgba(7, 17, 13, .38);
+      cursor: pointer;
+      transition: border-color .18s ease, background .18s ease, transform .18s ease;
+    }
+    .upload-zone:hover, .upload-zone.dragging {
+      border-color: var(--green);
+      background: rgba(102, 227, 155, .07);
+    }
+    .upload-zone.dragging { transform: translateY(-2px); }
+    .upload-zone[aria-disabled="true"] { cursor: not-allowed; opacity: .55; }
+    .upload-copy strong { display: block; margin-bottom: 5px; color: #dcebe0; font-size: 14px; }
+    .upload-copy span { display: block; font-size: 12px; line-height: 1.5; }
+    .upload-progress { margin-top: 2px; }
+    .upload-progress[hidden] { display: none; }
+    .upload-status { min-height: 18px; color: var(--muted); font-size: 12px; }
+    .upload-status.error { color: var(--red); }
+    .upload-status.success { color: var(--green); }
+
     .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 24px; }
     .button {
       min-height: 44px;
@@ -324,6 +370,7 @@
       .form-grid, .details-grid, .team-grid, .result-grid { grid-template-columns: 1fr; }
       .summary-images { grid-template-columns: 1fr; }
       .section-title { align-items: flex-start; flex-direction: column; }
+      .connection-notice, .upload-zone { align-items: flex-start; flex-direction: column; }
     }
   </style>
 </head>
@@ -336,6 +383,11 @@
       </div>
       <div class="local-chip">仅限本机 · 127.0.0.1</div>
     </header>
+
+    <div class="connection-notice" id="connection-notice" role="alert" hidden>
+      <div><strong id="connection-title">本地服务未连接</strong><span id="connection-message">请从仓库根目录启动 GUI 服务。</span></div>
+      <a href="http://127.0.0.1:8765">打开本地 GUI</a>
+    </div>
 
     <section class="hero" aria-labelledby="page-title">
       <div>
@@ -366,7 +418,7 @@
             <div class="notice good">普通检查会核对依赖和已知文件哈希；加载模型检查更彻底，但需要更多时间和内存。</div>
             <div class="actions">
               <label class="toggle"><input id="setup-load-models" type="checkbox">加载两个 YOLO 模型并验证元数据</label>
-              <button class="button primary" type="button" id="run-setup">开始环境检查</button>
+              <button class="button primary" type="button" id="run-setup" data-requires-server>开始环境检查</button>
             </div>
             <div class="setup-summary" aria-label="环境检查摘要">
               <div class="setup-metric ok"><strong id="setup-ok">0</strong><span>正常项目</span></div>
@@ -379,8 +431,8 @@
         <section class="tab-panel" id="panel-analysis" role="tabpanel" aria-labelledby="tab-analysis" hidden>
           <form class="card form-card" id="analysis-form">
             <div class="card-header">
-              <div><div class="step-number">02 · ANALYZE</div><h2>配置视频分析</h2><p>完整映射 main.py 参数。推荐先用短片验证颜色和模型，再处理整场比赛。</p></div>
-              <button class="button text" type="button" id="refresh-catalog">刷新目录</button>
+              <div><div class="step-number">02 · ANALYZE</div><h2>配置视频分析</h2><p>支持动态镜头标定、独立足球追踪与速度图层。推荐先用短片验证颜色和模型，再处理整场比赛。</p></div>
+              <button class="button text" type="button" id="refresh-catalog" data-requires-server>刷新目录</button>
             </div>
             <div class="form-grid">
               <div class="field">
@@ -392,6 +444,28 @@
                 <label for="analysis-input">输入比赛视频</label>
                 <select id="analysis-input" required></select>
                 <div class="hint" id="analysis-video-meta">请先把视频放入 input_videos。</div>
+              </div>
+              <div class="field full">
+                <span class="label" id="upload-video-label">添加比赛视频</span>
+                <div class="upload-zone" id="video-drop-zone" role="group" aria-labelledby="upload-video-label">
+                  <input id="video-file" type="file" accept=".mp4,.mov,.avi,.mkv,.m4v,.webm" hidden>
+                  <div class="upload-copy"><strong>把一个视频拖到这里</strong><span>或从电脑选择，上传后会保存到 input_videos 并自动选中。</span></div>
+                  <button class="button secondary" type="button" id="choose-video" data-requires-server>选择视频</button>
+                </div>
+                <div class="upload-progress" id="upload-progress" hidden>
+                  <div class="progress" aria-label="视频上传进度"><div class="progress-fill" id="upload-progress-fill"></div></div>
+                </div>
+                <div class="upload-status" id="upload-status" role="status" aria-live="polite">支持 MP4、MOV、AVI、MKV、M4V 和 WebM，单文件最大 20 GiB。</div>
+              </div>
+              <div class="field">
+                <label for="analysis-pitch-length">球场边线长度（米）</label>
+                <input id="analysis-pitch-length" type="number" min="33.01" step="0.01" value="105" required>
+                <div class="hint">填写本场实际测量长度，用于动态米制标定和速度估算。</div>
+              </div>
+              <div class="field">
+                <label for="analysis-pitch-width">球场球门线宽度（米）</label>
+                <input id="analysis-pitch-width" type="number" min="40.32" step="0.01" value="68" required>
+                <div class="hint">常见标准场地为 105 × 68 米，请按实际场地修改。</div>
               </div>
               <div class="field">
                 <label for="analysis-club1">第一队名称</label>
@@ -430,16 +504,17 @@
                 <div class="details-grid">
                   <div class="field"><label for="analysis-object-model">目标检测模型</label><select id="analysis-object-model" required></select></div>
                   <div class="field"><label for="analysis-keypoints-model">球场关键点模型</label><select id="analysis-keypoints-model" required></select></div>
+                  <div class="field"><label for="analysis-ball-model">独立足球检测模型</label><select id="analysis-ball-model" required></select><div class="hint">模型类别 0 必须为 ball。</div></div>
                   <div class="field"><label for="analysis-field-image">球场俯视底图</label><select id="analysis-field-image" required></select></div>
                   <div class="field"><label for="analysis-batch">推理批量大小</label><input id="analysis-batch" type="number" min="1" step="1" value="1" required><div class="hint">CPU 建议保持 1。</div></div>
                   <div class="field"><label for="analysis-skip">跳过开头秒数</label><input id="analysis-skip" type="number" min="0" step="1" value="0" required></div>
                   <div class="field"><label for="analysis-output">标注视频路径</label><input id="analysis-output" type="text" required></div>
-                  <div class="field full"><label for="analysis-tracks">轨迹目录</label><input id="analysis-tracks" type="text" required><div class="hint">只能写入 output_videos；已有轨迹会在确认后覆盖。</div></div>
+                  <div class="field full"><label for="analysis-tracks">原始轨迹目录</label><input id="analysis-tracks" type="text" required><div class="hint">默认生成 object、keypoint、calibration 三个 JSONL；只能写入 output_videos。</div></div>
                 </div>
               </details>
             </div>
             <div class="actions">
-              <button class="button primary" type="submit">开始视频分析</button>
+              <button class="button primary" type="submit" data-requires-server>开始视频分析</button>
               <button class="button secondary" type="button" id="reset-output-paths">应用推荐路径</button>
             </div>
           </form>
@@ -449,16 +524,18 @@
           <form class="card form-card" id="summary-form">
             <div class="card-header">
               <div><div class="step-number">03 · REPORT</div><h2>生成战术总结</h2><p>从已有 JSONL 轨迹生成逐分钟指标、球队热力图、阵型时间线和中文报告。</p></div>
-              <button class="button text" type="button" id="refresh-results">刷新结果</button>
+              <button class="button text" type="button" id="refresh-results" data-requires-server>刷新结果</button>
             </div>
             <div class="form-grid">
               <div class="field full"><label for="summary-tracks">轨迹目录</label><select id="summary-tracks" required></select></div>
               <div class="field"><label for="summary-source">源视频</label><select id="summary-source" required></select></div>
               <div class="field"><label for="summary-fps">轨迹采样 FPS</label><input id="summary-fps" type="number" min="0.001" step="0.001" value="1" required><div class="hint">普通全帧分析使用源视频 FPS。</div></div>
+              <div class="field"><label for="summary-pitch-length">球场边线长度（米）</label><input id="summary-pitch-length" type="number" min="33.01" step="0.01" value="105" required></div>
+              <div class="field"><label for="summary-pitch-width">球场球门线宽度（米）</label><input id="summary-pitch-width" type="number" min="40.32" step="0.01" value="68" required></div>
               <div class="field full"><label for="summary-output">总结输出目录</label><input id="summary-output" type="text" value="output_videos/match/summary" required></div>
               <div class="field full"><div class="notice">当前总结脚本只识别队名 Red 与 Blue。轨迹来自其他队名时，报告不会正确统计两队。</div></div>
             </div>
-            <div class="actions"><button class="button primary" type="submit">生成战术总结</button></div>
+            <div class="actions"><button class="button primary" type="submit" data-requires-server>生成战术总结</button></div>
           </form>
         </section>
       </div>
@@ -503,6 +580,8 @@
       lastLogSeq: 0,
       logLines: [],
       pollToken: 0,
+      backendAvailable: false,
+      uploading: false,
     };
 
     const $ = (selector) => document.querySelector(selector);
@@ -542,20 +621,46 @@
       toast.timer = setTimeout(() => { element.className = "toast"; }, 4200);
     }
 
+    function setBackendAvailable(available, directFile = false) {
+      state.backendAvailable = available;
+      $$('[data-requires-server]').forEach((control) => {
+        control.disabled = !available || (control.id === "choose-video" && state.uploading);
+      });
+      $("#video-file").disabled = !available || state.uploading;
+      $("#video-drop-zone").setAttribute("aria-disabled", (!available || state.uploading) ? "true" : "false");
+
+      const notice = $("#connection-notice");
+      notice.hidden = available;
+      if (!available) {
+        $("#connection-title").textContent = directFile ? "不能直接打开 GUI 页面" : "本地 GUI 服务未连接";
+        $("#connection-message").textContent = directFile
+          ? "请双击仓库根目录的 start_gui.cmd，再使用它自动打开的 http://127.0.0.1:8765 页面。"
+          : "请双击仓库根目录的 start_gui.cmd，或在虚拟环境中运行 gui_server.py。";
+      }
+    }
+
     async function api(path, options = {}) {
       const config = { ...options, headers: { ...(options.headers || {}) } };
       if (config.body && typeof config.body !== "string") {
         config.headers["Content-Type"] = "application/json";
         config.body = JSON.stringify(config.body);
       }
-      const response = await fetch(path, config);
+      let response;
+      try {
+        response = await fetch(path, config);
+      } catch (_error) {
+        setBackendAvailable(false, window.location.protocol === "file:");
+        throw new Error("无法连接本地 GUI 服务，请先运行 start_gui.cmd");
+      }
       const data = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
       if (!response.ok) {
+        setBackendAvailable(!(response.status === 404 && !data.code));
         const error = new Error(data.error || `请求失败 (${response.status})`);
         error.data = data;
         error.status = response.status;
         throw error;
       }
+      setBackendAvailable(true);
       return data;
     }
 
@@ -567,7 +672,7 @@
       });
     }
 
-    function fillSelect(element, items, labelFn, selectedPath = null, emptyText = "暂无可选文件") {
+    function fillSelect(element, items, labelFn, selectedPath = null, emptyText = "暂无可选文件", requireExplicit = false) {
       const previous = selectedPath || element.value;
       element.replaceChildren();
       if (!items.length) {
@@ -578,7 +683,14 @@
         return;
       }
       items.forEach((item) => element.add(new Option(labelFn(item), item.path)));
-      if (items.some((item) => item.path === previous)) element.value = previous;
+      if (items.some((item) => item.path === previous)) {
+        element.value = previous;
+      } else if (requireExplicit) {
+        const option = new Option(emptyText, "");
+        option.disabled = true;
+        option.selected = true;
+        element.add(option, 0);
+      }
     }
 
     function videoLabel(video) {
@@ -586,18 +698,19 @@
       return `${video.path}${meta}`;
     }
 
-    async function loadCatalog(showToast = false) {
+    async function loadCatalog(showToast = false, selectedVideo = null) {
       try {
         state.catalog = await api("/api/catalog");
         $("#stat-videos").textContent = state.catalog.videos.length;
         $("#stat-models").textContent = state.catalog.models.length;
         $("#stat-tracks").textContent = state.catalog.track_dirs.length;
 
-        fillSelect($("#analysis-input"), state.catalog.videos, videoLabel);
+        fillSelect($("#analysis-input"), state.catalog.videos, videoLabel, selectedVideo);
         fillSelect($("#summary-source"), state.catalog.videos, videoLabel);
-        fillSelect($("#analysis-object-model"), state.catalog.models, (item) => `${item.path} · ${item.kind}`, state.catalog.defaults.object_model);
-        fillSelect($("#analysis-keypoints-model"), state.catalog.models, (item) => `${item.path} · ${item.kind}`, state.catalog.defaults.keypoints_model);
-        fillSelect($("#analysis-field-image"), state.catalog.field_images, (item) => item.path, state.catalog.defaults.field_image, "未找到球场底图");
+        fillSelect($("#analysis-object-model"), state.catalog.models, (item) => `${item.path} · ${item.kind}`, state.catalog.defaults.object_model, "请选择目标检测模型", true);
+        fillSelect($("#analysis-keypoints-model"), state.catalog.models, (item) => `${item.path} · ${item.kind}`, state.catalog.defaults.keypoints_model, "请选择 32 点关键点模型", true);
+        fillSelect($("#analysis-ball-model"), state.catalog.models, (item) => `${item.path} · ${item.kind}`, state.catalog.defaults.ball_model, "请选择类别 0 为 ball 的独立模型", true);
+        fillSelect($("#analysis-field-image"), state.catalog.field_images, (item) => item.path, state.catalog.defaults.field_image, "请选择球场俯视底图", true);
         fillSelect($("#summary-tracks"), state.catalog.track_dirs, (item) => item.path, null, "未找到完整轨迹目录");
         updateVideoMeta();
         updateSummaryFps(false);
@@ -605,6 +718,83 @@
       } catch (error) {
         toast(error.message, true);
       }
+    }
+
+    function uploadResponse(xhr) {
+      if (xhr.response && typeof xhr.response === "object") return xhr.response;
+      try { return JSON.parse(xhr.responseText || "{}"); }
+      catch (_error) { return {}; }
+    }
+
+    function setUploadStatus(message, kind = "") {
+      const status = $("#upload-status");
+      status.textContent = message;
+      status.className = `upload-status${kind ? ` ${kind}` : ""}`;
+    }
+
+    function setUploadBusy(busy) {
+      state.uploading = busy;
+      $("#choose-video").disabled = busy || !state.backendAvailable;
+      $("#video-file").disabled = busy || !state.backendAvailable;
+      $("#video-drop-zone").setAttribute("aria-disabled", (busy || !state.backendAvailable) ? "true" : "false");
+    }
+
+    function uploadVideo(file) {
+      if (!file || state.uploading || !state.backendAvailable) return;
+      const extension = file.name.includes(".") ? `.${file.name.split(".").pop().toLowerCase()}` : "";
+      const supported = [".mp4", ".mov", ".avi", ".mkv", ".m4v", ".webm"];
+      if (!supported.includes(extension)) {
+        setUploadStatus("不支持该格式，请选择 MP4、MOV、AVI、MKV、M4V 或 WebM。", "error");
+        return;
+      }
+      if (file.size === 0) {
+        setUploadStatus("不能上传空视频。", "error");
+        return;
+      }
+      if (file.size > 20 * 1024 * 1024 * 1024) {
+        setUploadStatus("视频超过 20 GiB 上传上限。", "error");
+        return;
+      }
+
+      const body = new FormData();
+      body.append("video", file, file.name);
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/videos");
+      xhr.responseType = "json";
+      setUploadBusy(true);
+      $("#upload-progress").hidden = false;
+      $("#upload-progress-fill").style.width = "0%";
+      setUploadStatus(`正在上传 ${file.name}…`);
+
+      xhr.upload.addEventListener("progress", (event) => {
+        if (!event.lengthComputable) return;
+        const percent = Math.min(100, Math.round(event.loaded / event.total * 100));
+        $("#upload-progress-fill").style.width = `${percent}%`;
+        setUploadStatus(percent === 100 ? "上传完成，正在校验视频…" : `正在上传 ${file.name} · ${percent}%`);
+      });
+      xhr.addEventListener("load", async () => {
+        const data = uploadResponse(xhr);
+        setUploadBusy(false);
+        if (xhr.status < 200 || xhr.status >= 300) {
+          if (xhr.status === 404 && !data.code) setBackendAvailable(false);
+          setUploadStatus(data.error || `上传失败 (HTTP ${xhr.status})`, "error");
+          return;
+        }
+        $("#upload-progress-fill").style.width = "100%";
+        await loadCatalog(false, data.video?.path || null);
+        setUploadStatus(`已添加 ${data.video?.path || file.name}`, "success");
+        toast("视频已上传并选中");
+      });
+      xhr.addEventListener("error", () => {
+        setUploadBusy(false);
+        setBackendAvailable(false);
+        setUploadStatus("上传中断：无法连接本地 GUI 服务。", "error");
+      });
+      xhr.addEventListener("abort", () => {
+        setUploadBusy(false);
+        setUploadStatus("上传已取消。", "error");
+      });
+      xhr.send(body);
     }
 
     function updateVideoMeta() {
@@ -629,8 +819,17 @@
     function applyRecommendedPaths() {
       const name = safeRunName();
       $("#analysis-output").value = `output_videos/${name}/${name}-analysis.mp4`;
-      $("#analysis-tracks").value = `output_videos/${name}/tracks`;
+      $("#analysis-tracks").value = `output_videos/${name}/raw`;
       $("#summary-output").value = `output_videos/${name}/summary`;
+    }
+
+    function applySummaryPathFromTracks() {
+      const tracks = $("#summary-tracks").value;
+      if (!tracks) return;
+      const parts = tracks.split("/");
+      $("#summary-output").value = parts.at(-1)?.toLowerCase() === "raw"
+        ? `${parts.slice(0, -1).join("/")}/summary`
+        : `${tracks}/summary`;
     }
 
     function hexToRgb(hex) {
@@ -657,7 +856,10 @@
         output: $("#analysis-output").value.trim(),
         object_model: $("#analysis-object-model").value,
         keypoints_model: $("#analysis-keypoints-model").value,
+        ball_model: $("#analysis-ball-model").value,
         field_image: $("#analysis-field-image").value,
+        pitch_length_m: Number($("#analysis-pitch-length").value),
+        pitch_width_m: Number($("#analysis-pitch-width").value),
         tracks_dir: $("#analysis-tracks").value.trim(),
         batch_size: Number($("#analysis-batch").value),
         skip_seconds: Number($("#analysis-skip").value),
@@ -810,6 +1012,8 @@
         $("#summary-source").value = options.input;
       }
       if (options.source_fps) $("#summary-fps").value = options.source_fps;
+      if (options.pitch_length_m) $("#summary-pitch-length").value = options.pitch_length_m;
+      if (options.pitch_width_m) $("#summary-pitch-width").value = options.pitch_width_m;
       const parent = options.output.split("/").slice(0, -1).join("/");
       $("#summary-output").value = `${parent}/summary`;
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -892,6 +1096,7 @@
         setTab("summary");
         if (Array.from($("#summary-tracks").options).some((option) => option.value === button.dataset.track)) {
           $("#summary-tracks").value = button.dataset.track;
+          applySummaryPathFromTracks();
         }
         window.scrollTo({ top: 0, behavior: "smooth" });
       }));
@@ -921,7 +1126,37 @@
     [$("#analysis-club1"), $("#analysis-club2")].forEach((input) => input.addEventListener("input", updateTeamCompatibility));
     $("#analysis-input").addEventListener("change", updateVideoMeta);
     $("#summary-source").addEventListener("change", () => updateSummaryFps(true));
+    $("#summary-tracks").addEventListener("change", applySummaryPathFromTracks);
     $("#analysis-name").addEventListener("change", applyRecommendedPaths);
+    $("#choose-video").addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (!state.backendAvailable || state.uploading) return;
+      $("#video-file").value = "";
+      $("#video-file").click();
+    });
+    $("#video-file").addEventListener("change", (event) => uploadVideo(event.target.files?.[0]));
+    $("#video-drop-zone").addEventListener("click", (event) => {
+      if (event.target === $("#video-file") || event.target.closest("#choose-video")) return;
+      if (!state.backendAvailable || state.uploading) return;
+      $("#video-file").value = "";
+      $("#video-file").click();
+    });
+    ["dragenter", "dragover"].forEach((name) => $("#video-drop-zone").addEventListener(name, (event) => {
+      event.preventDefault();
+      if (state.backendAvailable && !state.uploading) $("#video-drop-zone").classList.add("dragging");
+    }));
+    ["dragleave", "drop"].forEach((name) => $("#video-drop-zone").addEventListener(name, (event) => {
+      event.preventDefault();
+      $("#video-drop-zone").classList.remove("dragging");
+    }));
+    $("#video-drop-zone").addEventListener("drop", (event) => {
+      if (!state.backendAvailable || state.uploading) return;
+      if (event.dataTransfer.files.length !== 1) {
+        setUploadStatus("一次只能上传一个视频。", "error");
+        return;
+      }
+      uploadVideo(event.dataTransfer.files[0]);
+    });
     $("#reset-output-paths").addEventListener("click", applyRecommendedPaths);
     $("#refresh-catalog").addEventListener("click", () => loadCatalog(true));
     $("#refresh-results").addEventListener("click", async () => { await Promise.all([loadCatalog(false), loadResults(true)]); });
@@ -941,12 +1176,20 @@
         output_dir: $("#summary-output").value.trim(),
         fps: Number($("#summary-fps").value),
         source: $("#summary-source").value,
+        pitch_length_m: Number($("#summary-pitch-length").value),
+        pitch_width_m: Number($("#summary-pitch-width").value),
       }});
     });
 
     applyRecommendedPaths();
     updateTeamCompatibility();
-    Promise.all([loadCatalog(false), loadResults(false)]).then(restoreCurrentJob);
+    if (window.location.protocol === "file:") {
+      setBackendAvailable(false, true);
+      setUploadStatus("请先通过 start_gui.cmd 启动本地服务。", "error");
+    } else {
+      setBackendAvailable(false);
+      Promise.all([loadCatalog(false), loadResults(false)]).then(restoreCurrentJob);
+    }
   </script>
 </body>
 </html>
