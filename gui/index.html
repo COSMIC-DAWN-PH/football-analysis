@@ -1,0 +1,952 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'">
+  <title>Football Analysis · 本地控制台</title>
+  <style>
+    :root {
+      --bg: #07110d;
+      --panel: #101d18;
+      --panel-2: #14241d;
+      --panel-3: #1a2d25;
+      --line: rgba(220, 255, 235, .12);
+      --line-strong: rgba(220, 255, 235, .22);
+      --text: #edf8f0;
+      --muted: #9db3a5;
+      --green: #66e39b;
+      --green-strong: #27c875;
+      --lime: #c7f36d;
+      --amber: #ffca6a;
+      --red: #ff7f7f;
+      --blue: #7db9ff;
+      --shadow: 0 24px 80px rgba(0, 0, 0, .28);
+      --radius: 20px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      min-height: 100vh;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 12% -10%, rgba(70, 215, 133, .18), transparent 30rem),
+        radial-gradient(circle at 95% 8%, rgba(199, 243, 109, .08), transparent 26rem),
+        var(--bg);
+    }
+
+    button, input, select, summary { font: inherit; }
+    button, select, input { color: inherit; }
+    a { color: var(--green); }
+    button { cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .52; }
+    :focus-visible { outline: 3px solid rgba(102, 227, 155, .45); outline-offset: 2px; }
+
+    .shell { width: min(1480px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 70px; }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 28px;
+    }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .brand-mark {
+      width: 44px;
+      height: 44px;
+      border: 1px solid rgba(199, 243, 109, .38);
+      border-radius: 14px;
+      background:
+        linear-gradient(90deg, transparent 48%, rgba(255,255,255,.25) 48% 52%, transparent 52%),
+        linear-gradient(0deg, transparent 48%, rgba(255,255,255,.25) 48% 52%, transparent 52%),
+        #1f7d4e;
+      box-shadow: inset 0 0 0 7px rgba(7, 17, 13, .35);
+    }
+    .brand strong { display: block; font-size: 17px; letter-spacing: .02em; }
+    .brand span { display: block; margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .local-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(16, 29, 24, .72);
+      font-size: 12px;
+    }
+    .local-chip::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 16px var(--green);
+    }
+
+    .hero {
+      position: relative;
+      overflow: hidden;
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(300px, .75fr);
+      gap: 38px;
+      align-items: end;
+      padding: 42px;
+      border: 1px solid var(--line);
+      border-radius: 28px;
+      background: linear-gradient(135deg, rgba(22, 42, 33, .98), rgba(11, 26, 20, .96));
+      box-shadow: var(--shadow);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 420px;
+      height: 420px;
+      right: -165px;
+      top: -210px;
+      border: 1px solid rgba(199, 243, 109, .18);
+      border-radius: 50%;
+      box-shadow: inset 0 0 0 74px rgba(102, 227, 155, .025), inset 0 0 0 76px rgba(199, 243, 109, .09);
+      pointer-events: none;
+    }
+    .eyebrow { color: var(--lime); font-size: 12px; font-weight: 750; letter-spacing: .16em; text-transform: uppercase; }
+    h1 { max-width: 760px; margin: 12px 0 16px; font-size: clamp(34px, 5vw, 66px); line-height: .98; letter-spacing: -.045em; }
+    .hero p { max-width: 720px; margin: 0; color: #b7c9bd; line-height: 1.75; }
+    .hero-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .hero-stat { padding: 18px; border: 1px solid var(--line); border-radius: 16px; background: rgba(7, 17, 13, .42); }
+    .hero-stat strong { display: block; color: var(--lime); font-size: 25px; }
+    .hero-stat span { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; }
+
+    .tabs {
+      position: sticky;
+      top: 10px;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: max-content;
+      max-width: 100%;
+      margin: 24px auto;
+      padding: 6px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(12, 26, 20, .88);
+      backdrop-filter: blur(16px);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, .25);
+    }
+    .tab-button {
+      min-width: 120px;
+      padding: 10px 18px;
+      border: 0;
+      border-radius: 11px;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .tab-button[aria-selected="true"] { color: #07110d; background: var(--green); }
+
+    .workspace { display: grid; grid-template-columns: minmax(0, 1fr) 390px; gap: 22px; align-items: start; }
+    .tab-panel[hidden] { display: none; }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(16, 29, 24, .92);
+      box-shadow: 0 16px 54px rgba(0, 0, 0, .18);
+    }
+    .form-card { padding: 28px; }
+    .card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 24px; }
+    .card-header h2, .section-title h2 { margin: 0; font-size: 24px; letter-spacing: -.025em; }
+    .card-header p, .section-title p { margin: 7px 0 0; color: var(--muted); line-height: 1.55; font-size: 14px; }
+    .step-number { color: var(--lime); font-size: 13px; font-weight: 800; letter-spacing: .08em; }
+
+    .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    .field { display: grid; gap: 8px; min-width: 0; }
+    .field.full { grid-column: 1 / -1; }
+    label, .label { color: #dcebe0; font-size: 13px; font-weight: 680; }
+    .hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    input[type="text"], input[type="number"], select {
+      width: 100%;
+      min-height: 45px;
+      padding: 10px 12px;
+      border: 1px solid var(--line-strong);
+      border-radius: 11px;
+      color: var(--text);
+      background: #0b1712;
+    }
+    select { text-overflow: ellipsis; }
+    input::placeholder { color: #65766b; }
+
+    .toggle-row { display: flex; flex-wrap: wrap; gap: 10px; }
+    .toggle {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      color: var(--muted);
+      background: #0b1712;
+      font-size: 13px;
+      user-select: none;
+    }
+    .toggle input { width: 17px; height: 17px; accent-color: var(--green-strong); }
+
+    details {
+      grid-column: 1 / -1;
+      border-top: 1px solid var(--line);
+      margin-top: 4px;
+      padding-top: 14px;
+    }
+    summary { color: var(--green); font-weight: 720; cursor: pointer; }
+    .details-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+
+    .team-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .team-card { padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: rgba(7, 17, 13, .48); }
+    .team-card h3 { margin: 0 0 14px; font-size: 15px; }
+    .team-card .field + .field { margin-top: 12px; }
+    .color-row { display: grid; grid-template-columns: 50px 1fr; gap: 10px; align-items: center; }
+    input[type="color"] { width: 50px; height: 42px; padding: 3px; border: 1px solid var(--line-strong); border-radius: 10px; background: #0b1712; }
+    .rgb-value { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+
+    .notice { padding: 13px 15px; border: 1px solid rgba(255, 202, 106, .22); border-radius: 12px; color: #efdcb3; background: rgba(255, 202, 106, .07); font-size: 13px; line-height: 1.55; }
+    .notice.good { border-color: rgba(102, 227, 155, .22); color: #c9f3d8; background: rgba(102, 227, 155, .065); }
+
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 24px; }
+    .button {
+      min-height: 44px;
+      padding: 10px 17px;
+      border: 1px solid transparent;
+      border-radius: 11px;
+      font-weight: 760;
+    }
+    .button.primary { color: #06120c; background: var(--green); box-shadow: 0 10px 28px rgba(39, 200, 117, .17); }
+    .button.secondary { border-color: var(--line-strong); color: var(--text); background: var(--panel-3); }
+    .button.danger { border-color: rgba(255, 127, 127, .3); color: #ffd0d0; background: rgba(255, 127, 127, .08); }
+    .button.text { min-height: auto; padding: 0; color: var(--green); background: transparent; }
+
+    .job-card { position: sticky; top: 88px; overflow: hidden; }
+    .job-top { padding: 22px; border-bottom: 1px solid var(--line); }
+    .job-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .job-heading h2 { margin: 0; font-size: 18px; }
+    .status-badge { padding: 5px 9px; border-radius: 999px; color: var(--muted); background: #0b1712; font-size: 11px; font-weight: 800; }
+    .status-badge.running, .status-badge.starting { color: var(--blue); background: rgba(125, 185, 255, .1); }
+    .status-badge.succeeded { color: var(--green); background: rgba(102, 227, 155, .1); }
+    .status-badge.failed { color: var(--red); background: rgba(255, 127, 127, .1); }
+    .status-badge.cancelled { color: var(--amber); background: rgba(255, 202, 106, .1); }
+    .phase { margin: 16px 0 10px; color: #d6e5da; font-size: 14px; }
+    .progress { height: 8px; overflow: hidden; border-radius: 999px; background: #07110d; }
+    .progress-fill { width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--green-strong), var(--lime)); transition: width .35s ease; }
+    .progress.indeterminate .progress-fill { width: 38%; animation: drift 1.25s ease-in-out infinite alternate; }
+    @keyframes drift { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+    .progress-caption { display: flex; justify-content: space-between; margin-top: 8px; color: var(--muted); font-size: 11px; }
+    .job-actions { display: flex; gap: 9px; margin-top: 16px; }
+    .log-wrap { padding: 18px; }
+    .log-label { display: flex; justify-content: space-between; margin-bottom: 9px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+    #job-log {
+      height: 300px;
+      margin: 0;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      color: #b9cbbf;
+      font: 11px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace;
+      scrollbar-color: #355044 transparent;
+    }
+    .empty-log { color: #65766b; }
+
+    .setup-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 22px; }
+    .setup-metric { padding: 15px; border: 1px solid var(--line); border-radius: 13px; background: #0b1712; }
+    .setup-metric strong { display: block; font-size: 21px; }
+    .setup-metric span { color: var(--muted); font-size: 11px; }
+    .setup-metric.ok strong { color: var(--green); }
+    .setup-metric.warn strong { color: var(--amber); }
+    .setup-metric.bad strong { color: var(--red); }
+
+    .results-section { margin-top: 44px; }
+    .section-title { display: flex; align-items: end; justify-content: space-between; gap: 20px; margin-bottom: 18px; }
+    .result-stats { display: flex; gap: 9px; flex-wrap: wrap; }
+    .result-stat { padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 12px; }
+    .result-block { margin-top: 18px; }
+    .result-block h3 { margin: 0 0 12px; font-size: 15px; color: #dcebe0; }
+    .result-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .result-card { overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--panel); }
+    .result-media { aspect-ratio: 16 / 9; width: 100%; object-fit: contain; background: #040805; }
+    .result-body { padding: 15px; }
+    .result-path { overflow-wrap: anywhere; color: #d6e5da; font-size: 13px; font-weight: 680; }
+    .result-meta { display: flex; justify-content: space-between; gap: 10px; margin-top: 8px; color: var(--muted); font-size: 11px; }
+    .file-links { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+    .file-link { padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; color: var(--green); text-decoration: none; font-size: 11px; }
+    .summary-images { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 12px; }
+    .summary-images img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border: 1px solid var(--line); border-radius: 9px; background: #07110d; }
+    .report-preview { display: none; max-height: 420px; margin: 12px 0 0; padding: 14px; overflow: auto; white-space: pre-wrap; word-break: break-word; border: 1px solid var(--line); border-radius: 10px; color: #c5d6ca; background: #08130e; font: 12px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .empty-state { padding: 28px; border: 1px dashed var(--line-strong); border-radius: 16px; color: var(--muted); text-align: center; }
+
+    .toast {
+      position: fixed;
+      right: 22px;
+      bottom: 22px;
+      z-index: 100;
+      max-width: min(430px, calc(100% - 44px));
+      padding: 13px 16px;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      color: var(--text);
+      background: #182a22;
+      box-shadow: var(--shadow);
+      transform: translateY(140%);
+      opacity: 0;
+      transition: .25s ease;
+    }
+    .toast.visible { transform: translateY(0); opacity: 1; }
+    .toast.error { border-color: rgba(255, 127, 127, .4); }
+
+    @media (max-width: 1050px) {
+      .hero { grid-template-columns: 1fr; }
+      .workspace { grid-template-columns: 1fr; }
+      .job-card { position: static; }
+      #job-log { height: 230px; }
+    }
+    @media (max-width: 720px) {
+      .shell { width: min(100% - 20px, 1480px); padding-top: 16px; }
+      .topbar { align-items: flex-start; }
+      .local-chip { display: none; }
+      .hero { padding: 26px 22px; border-radius: 22px; }
+      .hero-stats { grid-template-columns: 1fr; }
+      .tabs { width: 100%; overflow-x: auto; justify-content: flex-start; }
+      .tab-button { min-width: 105px; }
+      .form-card { padding: 20px; }
+      .form-grid, .details-grid, .team-grid, .result-grid { grid-template-columns: 1fr; }
+      .summary-images { grid-template-columns: 1fr; }
+      .section-title { align-items: flex-start; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"></div>
+        <div><strong>Football Analysis</strong><span>Local control room</span></div>
+      </div>
+      <div class="local-chip">仅限本机 · 127.0.0.1</div>
+    </header>
+
+    <section class="hero" aria-labelledby="page-title">
+      <div>
+        <div class="eyebrow">Match intelligence workspace</div>
+        <h1 id="page-title">从比赛视频到<br>可读的战术视图</h1>
+        <p>检查模型与环境，配置完整分析流水线，并在一个页面里查看标注视频、轨迹数据、热力图和战术报告。所有任务都在这台电脑上运行。</p>
+      </div>
+      <div class="hero-stats" aria-label="仓库文件概览">
+        <div class="hero-stat"><strong id="stat-videos">—</strong><span>输入视频</span></div>
+        <div class="hero-stat"><strong id="stat-models">—</strong><span>可用模型</span></div>
+        <div class="hero-stat"><strong id="stat-tracks">—</strong><span>轨迹目录</span></div>
+      </div>
+    </section>
+
+    <nav class="tabs" role="tablist" aria-label="GUI 功能">
+      <button class="tab-button" type="button" role="tab" aria-selected="true" aria-controls="panel-setup" id="tab-setup" data-tab="setup">环境检查</button>
+      <button class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-analysis" id="tab-analysis" data-tab="analysis">视频分析</button>
+      <button class="tab-button" type="button" role="tab" aria-selected="false" aria-controls="panel-summary" id="tab-summary" data-tab="summary">战术总结</button>
+    </nav>
+
+    <main class="workspace">
+      <div>
+        <section class="tab-panel" id="panel-setup" role="tabpanel" aria-labelledby="tab-setup">
+          <div class="card form-card">
+            <div class="card-header">
+              <div><div class="step-number">01 · PRE-FLIGHT</div><h2>确认本机环境</h2><p>检查 Python、推理设备、模型权重和球场底图，再开始耗时分析。</p></div>
+            </div>
+            <div class="notice good">普通检查会核对依赖和已知文件哈希；加载模型检查更彻底，但需要更多时间和内存。</div>
+            <div class="actions">
+              <label class="toggle"><input id="setup-load-models" type="checkbox">加载两个 YOLO 模型并验证元数据</label>
+              <button class="button primary" type="button" id="run-setup">开始环境检查</button>
+            </div>
+            <div class="setup-summary" aria-label="环境检查摘要">
+              <div class="setup-metric ok"><strong id="setup-ok">0</strong><span>正常项目</span></div>
+              <div class="setup-metric warn"><strong id="setup-warn">0</strong><span>需要留意</span></div>
+              <div class="setup-metric bad"><strong id="setup-bad">0</strong><span>缺失或不兼容</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-panel" id="panel-analysis" role="tabpanel" aria-labelledby="tab-analysis" hidden>
+          <form class="card form-card" id="analysis-form">
+            <div class="card-header">
+              <div><div class="step-number">02 · ANALYZE</div><h2>配置视频分析</h2><p>完整映射 main.py 参数。推荐先用短片验证颜色和模型，再处理整场比赛。</p></div>
+              <button class="button text" type="button" id="refresh-catalog">刷新目录</button>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="analysis-name">运行名称</label>
+                <input id="analysis-name" type="text" value="match" maxlength="80" required>
+                <div class="hint">用于生成 output_videos 下的推荐目录。</div>
+              </div>
+              <div class="field">
+                <label for="analysis-input">输入比赛视频</label>
+                <select id="analysis-input" required></select>
+                <div class="hint" id="analysis-video-meta">请先把视频放入 input_videos。</div>
+              </div>
+              <div class="field">
+                <label for="analysis-club1">第一队名称</label>
+                <input id="analysis-club1" type="text" value="Red" maxlength="100" required>
+              </div>
+              <div class="field">
+                <label for="analysis-club2">第二队名称</label>
+                <input id="analysis-club2" type="text" value="Blue" maxlength="100" required>
+              </div>
+              <div class="field full">
+                <div class="team-grid">
+                  <div class="team-card">
+                    <h3>第一队球衣参考色</h3>
+                    <div class="field"><span class="label">场上球员</span><div class="color-row"><input id="club1-player" type="color" value="#e8f7f8" aria-label="第一队球员颜色"><span class="rgb-value" data-for="club1-player">232, 247, 248</span></div></div>
+                    <div class="field"><span class="label">守门员</span><div class="color-row"><input id="club1-goalkeeper" type="color" value="#061915" aria-label="第一队守门员颜色"><span class="rgb-value" data-for="club1-goalkeeper">6, 25, 21</span></div></div>
+                  </div>
+                  <div class="team-card">
+                    <h3>第二队球衣参考色</h3>
+                    <div class="field"><span class="label">场上球员</span><div class="color-row"><input id="club2-player" type="color" value="#acfb91" aria-label="第二队球员颜色"><span class="rgb-value" data-for="club2-player">172, 251, 145</span></div></div>
+                    <div class="field"><span class="label">守门员</span><div class="color-row"><input id="club2-goalkeeper" type="color" value="#ef9c84" aria-label="第二队守门员颜色"><span class="rgb-value" data-for="club2-goalkeeper">239, 156, 132</span></div></div>
+                  </div>
+                </div>
+              </div>
+              <div class="field full"><div class="notice" id="team-compatibility">当前队名兼容战术总结脚本。</div></div>
+              <div class="field full">
+                <span class="label">可选叠加与窗口</span>
+                <div class="toggle-row">
+                  <label class="toggle"><input id="analysis-speed" type="checkbox">估算并绘制速度</label>
+                  <label class="toggle"><input id="analysis-possession" type="checkbox">绘制模型控球率</label>
+                  <label class="toggle"><input id="analysis-preview" type="checkbox">另开 OpenCV 实时窗口</label>
+                </div>
+              </div>
+
+              <details>
+                <summary>高级参数与输出路径</summary>
+                <div class="details-grid">
+                  <div class="field"><label for="analysis-object-model">目标检测模型</label><select id="analysis-object-model" required></select></div>
+                  <div class="field"><label for="analysis-keypoints-model">球场关键点模型</label><select id="analysis-keypoints-model" required></select></div>
+                  <div class="field"><label for="analysis-field-image">球场俯视底图</label><select id="analysis-field-image" required></select></div>
+                  <div class="field"><label for="analysis-batch">推理批量大小</label><input id="analysis-batch" type="number" min="1" step="1" value="1" required><div class="hint">CPU 建议保持 1。</div></div>
+                  <div class="field"><label for="analysis-skip">跳过开头秒数</label><input id="analysis-skip" type="number" min="0" step="1" value="0" required></div>
+                  <div class="field"><label for="analysis-output">标注视频路径</label><input id="analysis-output" type="text" required></div>
+                  <div class="field full"><label for="analysis-tracks">轨迹目录</label><input id="analysis-tracks" type="text" required><div class="hint">只能写入 output_videos；已有轨迹会在确认后覆盖。</div></div>
+                </div>
+              </details>
+            </div>
+            <div class="actions">
+              <button class="button primary" type="submit">开始视频分析</button>
+              <button class="button secondary" type="button" id="reset-output-paths">应用推荐路径</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="tab-panel" id="panel-summary" role="tabpanel" aria-labelledby="tab-summary" hidden>
+          <form class="card form-card" id="summary-form">
+            <div class="card-header">
+              <div><div class="step-number">03 · REPORT</div><h2>生成战术总结</h2><p>从已有 JSONL 轨迹生成逐分钟指标、球队热力图、阵型时间线和中文报告。</p></div>
+              <button class="button text" type="button" id="refresh-results">刷新结果</button>
+            </div>
+            <div class="form-grid">
+              <div class="field full"><label for="summary-tracks">轨迹目录</label><select id="summary-tracks" required></select></div>
+              <div class="field"><label for="summary-source">源视频</label><select id="summary-source" required></select></div>
+              <div class="field"><label for="summary-fps">轨迹采样 FPS</label><input id="summary-fps" type="number" min="0.001" step="0.001" value="1" required><div class="hint">普通全帧分析使用源视频 FPS。</div></div>
+              <div class="field full"><label for="summary-output">总结输出目录</label><input id="summary-output" type="text" value="output_videos/match/summary" required></div>
+              <div class="field full"><div class="notice">当前总结脚本只识别队名 Red 与 Blue。轨迹来自其他队名时，报告不会正确统计两队。</div></div>
+            </div>
+            <div class="actions"><button class="button primary" type="submit">生成战术总结</button></div>
+          </form>
+        </section>
+      </div>
+
+      <aside class="card job-card" aria-label="当前任务">
+        <div class="job-top">
+          <div class="job-heading"><h2>任务监控</h2><span class="status-badge" id="job-status">空闲</span></div>
+          <div class="phase" id="job-phase">还没有启动任务</div>
+          <div class="progress" id="job-progress" aria-label="任务进度"><div class="progress-fill" id="job-progress-fill"></div></div>
+          <div class="progress-caption"><span id="job-type">等待操作</span><span id="job-progress-text">—</span></div>
+          <div class="job-actions">
+            <button class="button danger" type="button" id="stop-job" disabled>停止任务</button>
+            <button class="button secondary" type="button" id="prepare-summary" hidden>用本次轨迹生成总结</button>
+          </div>
+        </div>
+        <div class="log-wrap">
+          <div class="log-label"><span>实时日志</span><span id="job-id">NO JOB</span></div>
+          <pre id="job-log" class="empty-log">任务输出会显示在这里。</pre>
+        </div>
+      </aside>
+    </main>
+
+    <section class="results-section" aria-labelledby="results-title">
+      <div class="section-title">
+        <div><h2 id="results-title">已生成结果</h2><p>重启 GUI 后仍会从 output_videos 自动发现这些产物。</p></div>
+        <div class="result-stats"><span class="result-stat" id="result-video-count">0 个视频</span><span class="result-stat" id="result-summary-count">0 份总结</span></div>
+      </div>
+      <div id="results-container"><div class="empty-state">正在扫描输出目录…</div></div>
+    </section>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    "use strict";
+
+    const state = {
+      catalog: { videos: [], models: [], field_images: [], track_dirs: [], defaults: {} },
+      results: { videos: [], tracks: [], summaries: [] },
+      activeJobId: null,
+      currentJob: null,
+      lastLogSeq: 0,
+      logLines: [],
+      pollToken: 0,
+    };
+
+    const $ = (selector) => document.querySelector(selector);
+    const $$ = (selector) => Array.from(document.querySelectorAll(selector));
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>'"]/g, (char) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
+      })[char]);
+    }
+
+    function formatBytes(bytes) {
+      if (!Number.isFinite(bytes)) return "—";
+      const units = ["B", "KB", "MB", "GB"];
+      let value = bytes;
+      let unit = 0;
+      while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit += 1; }
+      return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
+    }
+
+    function formatDuration(seconds) {
+      if (!Number.isFinite(seconds)) return "未知时长";
+      const minutes = Math.floor(seconds / 60);
+      const rest = Math.round(seconds % 60).toString().padStart(2, "0");
+      return `${minutes}:${rest}`;
+    }
+
+    function artifactUrl(url) {
+      return String(url || "").split("/").map((part, index) => index === 0 ? part : encodeURIComponent(part)).join("/");
+    }
+
+    function toast(message, error = false) {
+      const element = $("#toast");
+      element.textContent = message;
+      element.className = `toast visible${error ? " error" : ""}`;
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(() => { element.className = "toast"; }, 4200);
+    }
+
+    async function api(path, options = {}) {
+      const config = { ...options, headers: { ...(options.headers || {}) } };
+      if (config.body && typeof config.body !== "string") {
+        config.headers["Content-Type"] = "application/json";
+        config.body = JSON.stringify(config.body);
+      }
+      const response = await fetch(path, config);
+      const data = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+      if (!response.ok) {
+        const error = new Error(data.error || `请求失败 (${response.status})`);
+        error.data = data;
+        error.status = response.status;
+        throw error;
+      }
+      return data;
+    }
+
+    function setTab(name) {
+      $$(".tab-button").forEach((button) => {
+        const active = button.dataset.tab === name;
+        button.setAttribute("aria-selected", active ? "true" : "false");
+        $(`#panel-${button.dataset.tab}`).hidden = !active;
+      });
+    }
+
+    function fillSelect(element, items, labelFn, selectedPath = null, emptyText = "暂无可选文件") {
+      const previous = selectedPath || element.value;
+      element.replaceChildren();
+      if (!items.length) {
+        const option = new Option(emptyText, "");
+        option.disabled = true;
+        option.selected = true;
+        element.add(option);
+        return;
+      }
+      items.forEach((item) => element.add(new Option(labelFn(item), item.path)));
+      if (items.some((item) => item.path === previous)) element.value = previous;
+    }
+
+    function videoLabel(video) {
+      const meta = video.fps ? ` · ${video.fps} FPS · ${formatDuration(video.duration_seconds)}` : "";
+      return `${video.path}${meta}`;
+    }
+
+    async function loadCatalog(showToast = false) {
+      try {
+        state.catalog = await api("/api/catalog");
+        $("#stat-videos").textContent = state.catalog.videos.length;
+        $("#stat-models").textContent = state.catalog.models.length;
+        $("#stat-tracks").textContent = state.catalog.track_dirs.length;
+
+        fillSelect($("#analysis-input"), state.catalog.videos, videoLabel);
+        fillSelect($("#summary-source"), state.catalog.videos, videoLabel);
+        fillSelect($("#analysis-object-model"), state.catalog.models, (item) => `${item.path} · ${item.kind}`, state.catalog.defaults.object_model);
+        fillSelect($("#analysis-keypoints-model"), state.catalog.models, (item) => `${item.path} · ${item.kind}`, state.catalog.defaults.keypoints_model);
+        fillSelect($("#analysis-field-image"), state.catalog.field_images, (item) => item.path, state.catalog.defaults.field_image, "未找到球场底图");
+        fillSelect($("#summary-tracks"), state.catalog.track_dirs, (item) => item.path, null, "未找到完整轨迹目录");
+        updateVideoMeta();
+        updateSummaryFps(false);
+        if (showToast) toast("目录已刷新");
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    function updateVideoMeta() {
+      const video = state.catalog.videos.find((item) => item.path === $("#analysis-input").value);
+      $("#analysis-video-meta").textContent = video
+        ? `${formatBytes(video.size)} · ${video.fps || "未知"} FPS · ${formatDuration(video.duration_seconds)}`
+        : "请先把视频放入 input_videos。";
+    }
+
+    function updateSummaryFps(force = true) {
+      const video = state.catalog.videos.find((item) => item.path === $("#summary-source").value);
+      if (video && video.fps && (force || $("#summary-fps").value === "1")) {
+        $("#summary-fps").value = video.fps;
+      }
+    }
+
+    function safeRunName() {
+      const value = $("#analysis-name").value.trim() || "match";
+      return value.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-").replace(/\s+/g, "-").replace(/\.+$/g, "").slice(0, 80) || "match";
+    }
+
+    function applyRecommendedPaths() {
+      const name = safeRunName();
+      $("#analysis-output").value = `output_videos/${name}/${name}-analysis.mp4`;
+      $("#analysis-tracks").value = `output_videos/${name}/tracks`;
+      $("#summary-output").value = `output_videos/${name}/summary`;
+    }
+
+    function hexToRgb(hex) {
+      return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+    }
+
+    function syncColorLabel(input) {
+      const label = document.querySelector(`.rgb-value[data-for="${input.id}"]`);
+      if (label) label.textContent = hexToRgb(input.value).join(", ");
+    }
+
+    function updateTeamCompatibility() {
+      const compatible = $("#analysis-club1").value.trim() === "Red" && $("#analysis-club2").value.trim() === "Blue";
+      const notice = $("#team-compatibility");
+      notice.className = `notice${compatible ? " good" : ""}`;
+      notice.textContent = compatible
+        ? "当前队名兼容战术总结脚本。"
+        : "提醒：战术总结脚本只识别 Red 与 Blue；自定义队名仍可完成视频分析，但不会进入总结统计。";
+    }
+
+    function analysisOptions() {
+      return {
+        input: $("#analysis-input").value,
+        output: $("#analysis-output").value.trim(),
+        object_model: $("#analysis-object-model").value,
+        keypoints_model: $("#analysis-keypoints-model").value,
+        field_image: $("#analysis-field-image").value,
+        tracks_dir: $("#analysis-tracks").value.trim(),
+        batch_size: Number($("#analysis-batch").value),
+        skip_seconds: Number($("#analysis-skip").value),
+        estimate_speed: $("#analysis-speed").checked,
+        annotate_possession: $("#analysis-possession").checked,
+        preview: $("#analysis-preview").checked,
+        club1_name: $("#analysis-club1").value.trim(),
+        club1_player: hexToRgb($("#club1-player").value),
+        club1_goalkeeper: hexToRgb($("#club1-goalkeeper").value),
+        club2_name: $("#analysis-club2").value.trim(),
+        club2_player: hexToRgb($("#club2-player").value),
+        club2_goalkeeper: hexToRgb($("#club2-goalkeeper").value),
+      };
+    }
+
+    async function submitJob(payload, canConfirmOverwrite = true) {
+      try {
+        const job = await api("/api/jobs", { method: "POST", body: payload });
+        startWatching(job);
+        toast("任务已启动");
+        return job;
+      } catch (error) {
+        if (error.data?.code === "overwrite_required" && canConfirmOverwrite) {
+          const names = (error.data.collisions || []).map((path) => `• ${path}`).join("\n");
+          if (window.confirm(`以下产物已经存在：\n\n${names}\n\n继续会覆盖它们，是否确认？`)) {
+            return submitJob({ ...payload, overwrite: true }, false);
+          }
+          return null;
+        }
+        if (error.data?.code === "active_job" && error.data.active_job_id) {
+          state.activeJobId = error.data.active_job_id;
+          state.lastLogSeq = 0;
+          state.logLines = [];
+          watchJob(++state.pollToken);
+        }
+        toast(error.message, true);
+        return null;
+      }
+    }
+
+    function startWatching(job) {
+      state.activeJobId = job.id;
+      state.currentJob = job;
+      state.lastLogSeq = 0;
+      state.logLines = [];
+      $("#job-log").textContent = "";
+      $("#job-log").classList.remove("empty-log");
+      renderJob(job);
+      watchJob(++state.pollToken);
+    }
+
+    function statusText(status) {
+      return ({ starting: "启动中", running: "运行中", succeeded: "已完成", failed: "失败", cancelled: "已取消" })[status] || "空闲";
+    }
+
+    function typeText(type) {
+      return ({ setup: "环境检查", analysis: "视频分析", summary: "战术总结" })[type] || "等待操作";
+    }
+
+    function renderJob(job) {
+      state.currentJob = job;
+      const badge = $("#job-status");
+      badge.textContent = statusText(job.status);
+      badge.className = `status-badge ${job.status || ""}`;
+      $("#job-phase").textContent = job.phase || "等待任务输出";
+      $("#job-type").textContent = typeText(job.type);
+      $("#job-id").textContent = job.id || "NO JOB";
+      const active = ["starting", "running"].includes(job.status);
+      $("#stop-job").disabled = !active;
+
+      const progress = $("#job-progress");
+      const fill = $("#job-progress-fill");
+      if (active && job.progress == null) {
+        progress.classList.add("indeterminate");
+        fill.style.width = "38%";
+        $("#job-progress-text").textContent = "处理中";
+      } else {
+        progress.classList.remove("indeterminate");
+        const value = Number.isFinite(job.progress) ? job.progress : (job.status === "succeeded" ? 100 : 0);
+        fill.style.width = `${value}%`;
+        $("#job-progress-text").textContent = Number.isFinite(job.progress) ? `约 ${job.progress}%` : statusText(job.status);
+      }
+
+      const prepare = $("#prepare-summary");
+      prepare.hidden = !(job.type === "analysis" && job.status === "succeeded");
+      if (job.type === "setup" && ["succeeded", "failed"].includes(job.status)) updateSetupSummary();
+    }
+
+    function appendLogs(logs) {
+      if (!logs?.length) return;
+      logs.forEach((item) => state.logLines.push(item.text));
+      if (state.logLines.length > 5000) state.logLines = state.logLines.slice(-5000);
+      const log = $("#job-log");
+      log.classList.remove("empty-log");
+      log.textContent = state.logLines.join("\n");
+      log.scrollTop = log.scrollHeight;
+    }
+
+    async function watchJob(token) {
+      if (!state.activeJobId || token !== state.pollToken) return;
+      try {
+        const job = await api(`/api/jobs/${state.activeJobId}?after=${state.lastLogSeq}`);
+        if (token !== state.pollToken) return;
+        appendLogs(job.logs);
+        state.lastLogSeq = job.next_log_seq;
+        renderJob(job);
+        if (["starting", "running"].includes(job.status)) {
+          setTimeout(() => watchJob(token), 900);
+        } else {
+          state.activeJobId = null;
+          await Promise.all([loadCatalog(false), loadResults(false)]);
+          toast(job.status === "succeeded" ? "任务完成，结果已刷新" : `任务${statusText(job.status)}`, job.status === "failed");
+        }
+      } catch (error) {
+        toast(error.message, true);
+        setTimeout(() => watchJob(token), 1800);
+      }
+    }
+
+    function updateSetupSummary() {
+      let ok = 0, warn = 0, bad = 0;
+      state.logLines.forEach((line) => {
+        if (/^OK:|Setup is ready/.test(line)) ok += 1;
+        if (/HASH MISMATCH|needs attention/i.test(line)) warn += 1;
+        if (/MISSING:|INCOMPATIBLE|Error/i.test(line)) bad += 1;
+      });
+      $("#setup-ok").textContent = ok;
+      $("#setup-warn").textContent = warn;
+      $("#setup-bad").textContent = bad;
+    }
+
+    async function stopCurrentJob() {
+      if (!state.activeJobId) return;
+      if (!window.confirm("确认停止当前任务？已经生成的部分产物会保留。")) return;
+      try {
+        const job = await api(`/api/jobs/${state.activeJobId}`, { method: "DELETE" });
+        renderJob(job);
+        toast("正在停止任务");
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function prepareSummaryFromJob() {
+      const options = state.currentJob?.options;
+      if (!options?.tracks_dir) return;
+      setTab("summary");
+      if (Array.from($("#summary-tracks").options).some((option) => option.value === options.tracks_dir)) {
+        $("#summary-tracks").value = options.tracks_dir;
+      }
+      if (Array.from($("#summary-source").options).some((option) => option.value === options.input)) {
+        $("#summary-source").value = options.input;
+      }
+      if (options.source_fps) $("#summary-fps").value = options.source_fps;
+      const parent = options.output.split("/").slice(0, -1).join("/");
+      $("#summary-output").value = `${parent}/summary`;
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      toast("已带入本次分析的轨迹和源视频");
+    }
+
+    async function loadResults(showToast = false) {
+      try {
+        state.results = await api("/api/results");
+        renderResults();
+        if (showToast) toast("结果已刷新");
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    function renderResults() {
+      $("#result-video-count").textContent = `${state.results.videos.length} 个视频`;
+      $("#result-summary-count").textContent = `${state.results.summaries.length} 份总结`;
+      const container = $("#results-container");
+      if (!state.results.videos.length && !state.results.summaries.length && !state.results.tracks.length) {
+        container.innerHTML = '<div class="empty-state">output_videos 中还没有可展示的结果。完成一次视频分析后会自动出现。</div>';
+        return;
+      }
+
+      const blocks = [];
+      if (state.results.videos.length) {
+        const cards = state.results.videos.map((video) => `
+          <article class="result-card">
+            <video class="result-media" controls preload="metadata" src="${escapeHtml(artifactUrl(video.url))}"></video>
+            <div class="result-body">
+              <div class="result-path">${escapeHtml(video.path)}</div>
+              <div class="result-meta"><span>${formatBytes(video.size)}</span><span>${video.fps ? `${video.fps} FPS · ${formatDuration(video.duration_seconds)}` : "视频产物"}</span></div>
+              <div class="file-links"><a class="file-link" href="${escapeHtml(artifactUrl(video.url))}" download>下载视频</a></div>
+            </div>
+          </article>`).join("");
+        blocks.push(`<div class="result-block"><h3>标注视频</h3><div class="result-grid">${cards}</div></div>`);
+      }
+
+      if (state.results.summaries.length) {
+        const cards = state.results.summaries.map((summary, index) => {
+          const images = ["team_heatmaps.png", "team_centres_timeline.png", "team_shape_timeline.png"]
+            .filter((name) => summary.files[name])
+            .map((name) => `<a href="${escapeHtml(artifactUrl(summary.files[name].url))}" target="_blank" rel="noreferrer"><img loading="lazy" src="${escapeHtml(artifactUrl(summary.files[name].url))}" alt="${escapeHtml(name)}"></a>`).join("");
+          const links = Object.entries(summary.files).map(([name, file]) => `<a class="file-link" href="${escapeHtml(artifactUrl(file.url))}" download>${escapeHtml(name)}</a>`).join("");
+          const report = summary.files["REPORT.md"];
+          return `<article class="result-card"><div class="result-body">
+            <div class="result-path">${escapeHtml(summary.directory)}</div>
+            <div class="summary-images">${images}</div>
+            <div class="file-links">${links}</div>
+            ${report ? `<div class="actions"><button class="button secondary report-button" type="button" data-target="report-${index}" data-url="${escapeHtml(artifactUrl(report.url))}">预览报告</button></div><pre class="report-preview" id="report-${index}"></pre>` : ""}
+          </div></article>`;
+        }).join("");
+        blocks.push(`<div class="result-block"><h3>战术总结</h3><div class="result-grid">${cards}</div></div>`);
+      }
+
+      if (state.results.tracks.length) {
+        const links = state.results.tracks.map((track) => `<button type="button" class="file-link track-summary-button" data-track="${escapeHtml(track.directory)}">${escapeHtml(track.directory)} · 生成总结</button>`).join("");
+        blocks.push(`<div class="result-block"><h3>可用轨迹</h3><div class="file-links">${links}</div></div>`);
+      }
+      container.innerHTML = blocks.join("");
+
+      $$(".report-button").forEach((button) => button.addEventListener("click", async () => {
+        const target = document.getElementById(button.dataset.target);
+        if (target.style.display === "block") { target.style.display = "none"; button.textContent = "预览报告"; return; }
+        if (!target.dataset.loaded) {
+          button.disabled = true;
+          try {
+            const response = await fetch(button.dataset.url);
+            if (!response.ok) throw new Error("报告读取失败");
+            target.textContent = await response.text();
+            target.dataset.loaded = "true";
+          } catch (error) { toast(error.message, true); }
+          finally { button.disabled = false; }
+        }
+        target.style.display = "block";
+        button.textContent = "收起报告";
+      }));
+      $$(".track-summary-button").forEach((button) => button.addEventListener("click", () => {
+        setTab("summary");
+        if (Array.from($("#summary-tracks").options).some((option) => option.value === button.dataset.track)) {
+          $("#summary-tracks").value = button.dataset.track;
+        }
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }));
+    }
+
+    async function restoreCurrentJob() {
+      try {
+        const data = await api("/api/jobs");
+        const active = data.jobs.find((job) => ["starting", "running"].includes(job.status));
+        if (active) {
+          state.activeJobId = active.id;
+          state.lastLogSeq = 0;
+          state.logLines = [];
+          renderJob(active);
+          watchJob(++state.pollToken);
+        } else if (data.jobs[0]) {
+          const latest = await api(`/api/jobs/${data.jobs[0].id}?after=0`);
+          appendLogs(latest.logs);
+          state.lastLogSeq = latest.next_log_seq;
+          renderJob(latest);
+        }
+      } catch (error) { toast(error.message, true); }
+    }
+
+    $$(".tab-button").forEach((button) => button.addEventListener("click", () => setTab(button.dataset.tab)));
+    $$('input[type="color"]').forEach((input) => input.addEventListener("input", () => syncColorLabel(input)));
+    [$("#analysis-club1"), $("#analysis-club2")].forEach((input) => input.addEventListener("input", updateTeamCompatibility));
+    $("#analysis-input").addEventListener("change", updateVideoMeta);
+    $("#summary-source").addEventListener("change", () => updateSummaryFps(true));
+    $("#analysis-name").addEventListener("change", applyRecommendedPaths);
+    $("#reset-output-paths").addEventListener("click", applyRecommendedPaths);
+    $("#refresh-catalog").addEventListener("click", () => loadCatalog(true));
+    $("#refresh-results").addEventListener("click", async () => { await Promise.all([loadCatalog(false), loadResults(true)]); });
+    $("#stop-job").addEventListener("click", stopCurrentJob);
+    $("#prepare-summary").addEventListener("click", prepareSummaryFromJob);
+    $("#run-setup").addEventListener("click", () => submitJob({ type: "setup", options: { load_models: $("#setup-load-models").checked } }));
+    $("#analysis-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!event.currentTarget.reportValidity()) return;
+      submitJob({ type: "analysis", options: analysisOptions() });
+    });
+    $("#summary-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!event.currentTarget.reportValidity()) return;
+      submitJob({ type: "summary", options: {
+        tracks_dir: $("#summary-tracks").value,
+        output_dir: $("#summary-output").value.trim(),
+        fps: Number($("#summary-fps").value),
+        source: $("#summary-source").value,
+      }});
+    });
+
+    applyRecommendedPaths();
+    updateTeamCompatibility();
+    Promise.all([loadCatalog(false), loadResults(false)]).then(restoreCurrentJob);
+  </script>
+</body>
+</html>

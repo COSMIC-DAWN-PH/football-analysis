@@ -175,6 +175,26 @@ The video combines the source frame with IDs, team-colored annotations, pitch ke
 
 The generated video is fixed at `1920×1080`. Frames are encoded as MP4 video after processing; the source audio track is not copied.
 
+## Local web GUI
+
+The repository includes a local-only browser interface for setup checks, video analysis, and tactical summaries. Install the GUI requirements in the same virtual environment:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-gui.txt
+```
+
+Start the interface from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe gui_server.py
+```
+
+The server opens `http://127.0.0.1:8765` in the default browser. Use `--no-browser` to suppress automatic opening or `--port PORT` to select another local port. It never listens on an external network interface.
+
+The GUI intentionally works only with repository-owned directories: put source videos in `input_videos/`, put checkpoints or OpenVINO exports in `models/weights/`, and keep generated artifacts under `output_videos/`. It runs one task at a time to avoid competing model loads, exposes live logs and cancellation, and scans existing output artifacts again after a restart. Existing output targets require an explicit overwrite confirmation.
+
+Video analysis can take substantially longer than the source duration on CPU. Closing the browser does not stop a running job while the local server remains open; reopen the page to reconnect to it.
+
 ## Optional tactical summary
 
 After generating tracks, `summarize_match.py` can create quality-filtered team metrics and visualizations.
