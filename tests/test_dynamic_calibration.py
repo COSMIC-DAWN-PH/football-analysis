@@ -117,6 +117,35 @@ class SpeedEstimatorTests(unittest.TestCase):
         result = estimator.calculate_speed(bad, 16 / 30.0)
         self.assertNotIn("speed", result["player"][1])
 
+    def test_last_valid_speed_is_held_for_display_only(self) -> None:
+        estimator = SpeedEstimator(display_hold_seconds=1.0)
+        latest = None
+        for frame in range(19):
+            timestamp = frame / 30.0
+            latest = estimator.calculate_speed(
+                {
+                    "player": {7: {"position_m": (2.0 * timestamp, 4.0)}},
+                    "goalkeeper": {},
+                },
+                timestamp,
+            )
+        self.assertIsNotNone(latest)
+        expected = latest["player"][7]["speed"]
+
+        held = estimator.calculate_speed(
+            {"player": {7: {}}, "goalkeeper": {}},
+            1.1,
+            projection_usable=False,
+        )
+        self.assertNotIn("speed", held["player"][7])
+        self.assertAlmostEqual(held["player"][7]["_display_speed"], expected)
+
+        expired = estimator.calculate_speed(
+            {"player": {7: {}}, "goalkeeper": {}},
+            1.7,
+            projection_usable=False,
+        )
+        self.assertNotIn("_display_speed", expired["player"][7])
 
 if __name__ == "__main__":
     unittest.main()

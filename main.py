@@ -40,6 +40,29 @@ def _rgb(value: str) -> tuple[int, int, int]:
     return channels
 
 
+def _run_name(input_path: Path) -> str:
+    """Return a stable output folder name for an input video."""
+    name = input_path.stem
+    for suffix in ("-input", "_input"):
+        if name.casefold().endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def _resolve_output_layout(
+    input_path: Path,
+    run_dir: Path | None = None,
+    output: Path | None = None,
+    tracks_dir: Path | None = None,
+) -> tuple[Path, Path, Path]:
+    """Resolve the run root, annotated video, and raw-track directory."""
+    name = _run_name(input_path)
+    resolved_run_dir = run_dir or Path("output_videos") / name
+    resolved_output = output or resolved_run_dir / f"{name}-analysis.mp4"
+    resolved_tracks_dir = tracks_dir or resolved_run_dir / "raw"
+    return resolved_run_dir, resolved_output, resolved_tracks_dir
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Analyze a football video with YOLO, ByteTrack, and pitch mapping."
@@ -48,8 +71,14 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("output_videos/analysis.mp4"),
+        default=None,
         help="Annotated output video",
+    )
+    parser.add_argument(
+        "--run-dir",
+        type=Path,
+        default=None,
+        help="Run folder; defaults to output_videos/<input-name>",
     )
     parser.add_argument("--object-model", type=Path, default=DEFAULT_OBJECT_MODEL)
     parser.add_argument("--keypoints-model", type=Path, default=DEFAULT_KEYPOINTS_MODEL)
@@ -67,14 +96,19 @@ def _build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Measured goal-line width of this pitch in metres",
     )
-    parser.add_argument("--tracks-dir", type=Path, default=Path("output_videos"))
+    parser.add_argument(
+        "--tracks-dir",
+        type=Path,
+        default=None,
+        help="Raw JSONL directory; defaults to <run-dir>/raw",
+    )
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--skip-seconds", type=int, default=0)
     parser.add_argument(
         "--estimate-speed",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Estimate and draw player speed (disabled by default for sampled video)",
+        help="Estimate and draw player and ball speed (disabled by default for sampled video)",
     )
     parser.add_argument(
         "--annotate-possession",
@@ -115,6 +149,13 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("--batch-size must be at least 1")
     if args.skip_seconds < 0:
         parser.error("--skip-seconds cannot be negative")
+
+    args.run_dir, args.output, args.tracks_dir = _resolve_output_layout(
+        args.input,
+        run_dir=args.run_dir,
+        output=args.output,
+        tracks_dir=args.tracks_dir,
+    )
 
     _require_paths(
         parser,

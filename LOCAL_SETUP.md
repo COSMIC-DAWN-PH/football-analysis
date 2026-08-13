@@ -27,13 +27,14 @@
 ```powershell
 .\.venv\Scripts\python.exe main.py `
   --input input_videos\match.mp4 `
-  --output output_videos\match-analysis.mp4 `
-  --tracks-dir output_videos\match-tracks `
+  --run-dir output_videos\match `
   --pitch-length-m 105 --pitch-width-m 68 `
   --batch-size 1 `
   --club1-name Red --club1-player 220,30,30 --club1-goalkeeper 20,20,20 `
   --club2-name Blue --club2-player 30,80,220 --club2-goalkeeper 240,220,30
 ```
+
+默认产物统一保存在 `output_videos\match`：分析视频位于根目录，原始 JSONL 位于 `raw`，战术摘要位于 `summary`。
 
 服务器或不需要实时窗口时加 `--no-preview`。NVIDIA GPU 服务器可把 `--batch-size` 提高到 8 或 10；本机 CPU 建议保持 1，并先用 10-30 秒短片验证。
 

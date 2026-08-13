@@ -15,7 +15,7 @@ A video-analysis pipeline for football footage. It detects and tracks players, g
 - Dynamic 32-point metric-pitch calibration with RANSAC and short LK optical-flow continuation.
 - Jersey-color team assignment with green-pitch masking and K-Means.
 - Top-down player projection and a dynamic Voronoi control view.
-- Timestamp-based robust player-speed estimation and model-estimated possession overlay.
+- Timestamp-based robust player and ball speed estimation with a model-estimated possession overlay.
 - Native-resolution annotated MP4 plus per-frame object, keypoint, and calibration JSONL files.
 - Optional tactical summaries, heatmaps, timelines, and quality metrics.
 - Headless execution and OpenVINO model-directory support.
@@ -124,8 +124,7 @@ Place a video under `input_videos/` or pass any readable local path. Set the RGB
 ```powershell
 .\.venv\Scripts\python.exe main.py `
   --input input_videos\match.mp4 `
-  --output output_videos\match-analysis.mp4 `
-  --tracks-dir output_videos\match-tracks `
+  --run-dir output_videos\match `
   --pitch-length-m 105 --pitch-width-m 68 `
   --batch-size 1 `
   --club1-name Red --club1-player 220,30,30 --club1-goalkeeper 20,20,20 `
@@ -138,17 +137,18 @@ Complete CLI:
 | Option | Default | Purpose |
 |---|---|---|
 | `--input PATH` | required | Input match video. |
-| `--output PATH` | `output_videos/analysis.mp4` | Annotated MP4 path. Parent directories are created automatically. |
+| `--output PATH` | `<run-dir>/<task-name>-analysis.mp4` | Annotated MP4 path. Parent directories are created automatically. |
+| `--run-dir PATH` | `output_videos/<input-name>` | Unified folder for this run. A trailing `-input` or `_input` is removed from the task name. |
 | `--object-model PATH` | automatic fallback | Object detector `.pt` file or OpenVINO model directory. |
 | `--keypoints-model PATH` | automatic fallback | Pitch pose `.pt` file or OpenVINO model directory. |
 | `--ball-model PATH` | automatic fallback | Dedicated ball detector `.pt` file or OpenVINO model directory. |
 | `--field-image PATH` | `input_videos/field_2d_v2.png` | Top-down pitch image used by the projection panel. |
 | `--pitch-length-m M` | required | Measured touchline length for this specific pitch. |
 | `--pitch-width-m M` | required | Measured goal-line width for this specific pitch. |
-| `--tracks-dir PATH` | `output_videos` | Directory for the three JSONL files. |
+| `--tracks-dir PATH` | `<run-dir>/raw` | Directory for the three raw JSONL files. |
 | `--batch-size N` | `1` | Inference batch size; must be at least 1. |
 | `--skip-seconds N` | `0` | Skip the beginning of the source; cannot be negative. |
-| `--estimate-speed` / `--no-estimate-speed` | disabled | Calculate and draw smoothed player speed. |
+| `--estimate-speed` / `--no-estimate-speed` | disabled | Calculate and draw smoothed player and ball speed. |
 | `--annotate-possession` / `--no-annotate-possession` | disabled | Draw accumulated model-estimated possession. |
 | `--preview` / `--no-preview` | enabled | Show or suppress the live OpenCV window. |
 | `--club1-name NAME` | `Club1` | First team name. Use `Red` for compatibility with the current summary script. |
@@ -166,12 +166,14 @@ Run `python main.py --help` for the complete interface.
 
 The main pipeline produces:
 
-- An annotated video at the path passed to `--output`.
-- `object_tracks.jsonl` under `--tracks-dir`.
-- `keypoint_tracks.jsonl` under `--tracks-dir`.
-- `calibration_tracks.jsonl` under `--tracks-dir`.
+- An annotated video at `<run-dir>/<task-name>-analysis.mp4`.
+- `<run-dir>/raw/object_tracks.jsonl`.
+- `<run-dir>/raw/keypoint_tracks.jsonl`.
+- `<run-dir>/raw/calibration_tracks.jsonl`.
 
-Each JSONL line represents one processed frame. Object records may include `bbox`, `confidence`, `position_m`, `projection`, `club`, `club_color`, `has_ball`, and `speed`. Ball records also expose `observed` and `track_confidence`.
+By default, each run groups its annotated video, `raw` tracks, and `summary` artifacts in one task folder. `--output` and `--tracks-dir` remain available as explicit overrides.
+
+Each JSONL line represents one processed frame. Object records may include `bbox`, `confidence`, `position_m`, `projection`, `club`, `club_color`, `has_ball`, and `speed`. Ball records also expose `observed`, `track_confidence`, `track_segment`, `track_confirmed`, and `speed_status`. Ball `speed` is emitted only when a confirmed segment passes detection-confidence, calibration-quality, and robust-motion checks; otherwise `speed_status` is `pending` and the video shows `Ball speed: pending`.
 
 `object_tracks.jsonl` has four top-level object groups. JSON serialization turns numeric track IDs into strings:
 
@@ -183,7 +185,7 @@ Each JSONL line represents one processed frame. Object records may include `bbox
 
 The old upstream `object_tracks.json` array is a legacy format. New output uses JSON Lines: consume the file one line at a time rather than loading it as one JSON array. Starting a new run in the same track directory removes previous generated JSONL files.
 
-The video combines the source frame with IDs, team-colored annotations, pitch keypoints, and a top-down pitch projection. Speed and possession graphics are controlled independently.
+The video combines the source frame with IDs, team-colored annotations, pitch keypoints, and a top-down pitch projection. Valid player speed remains visible for about one second. Ball speed is shown only on frames that pass the trust gates; otherwise it is labeled `Ball speed: pending`. Unassigned possession is labeled `Unconfirmed`. Speed and possession graphics are controlled independently.
 
 The generated video keeps the input frame dimensions and aspect ratio. Frames are encoded as MP4 after processing; the source audio track is not copied.
 
@@ -195,12 +197,13 @@ This optional script also requires Matplotlib: `python -m pip install matplotlib
 
 ```powershell
 .\.venv\Scripts\python.exe summarize_match.py `
-  --tracks-dir output_videos\match-tracks `
-  --output-dir output_videos\match-summary `
+  --tracks-dir output_videos\match\raw `
   --fps 1 `
   --source input_videos\match.mp4 `
   --pitch-length-m 105 --pitch-width-m 68
 ```
+
+When `--output-dir` is omitted, the summary is written to `output_videos\match\summary`; pass the option explicitly to override it.
 
 `--fps` is the sampling rate represented by the JSONL lines, not automatically the original video's frame rate. For example, tracks produced from one sampled frame per source second require `--fps 1`; normal full-frame processing usually uses the source FPS.
 

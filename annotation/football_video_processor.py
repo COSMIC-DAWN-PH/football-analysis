@@ -4,7 +4,7 @@ from .object_annotator import ObjectAnnotator
 from .keypoints_annotator import KeypointsAnnotator
 from .projection_annotator import ProjectionAnnotator
 from position_mappers import ObjectPositionMapper, PitchGeometry
-from speed_estimation import SpeedEstimator
+from speed_estimation import BallSpeedEstimator, SpeedEstimator
 from .frame_number_annotator import FrameNumberAnnotator
 from file_writing import TracksJsonWriter
 from tracking import BallDetector, BallTracker, ObjectTracker, KeypointsTracker
@@ -73,6 +73,7 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
             pitch_geometry, display_size=(field_image.shape[1], field_image.shape[0])
         )
         self.speed_estimator = SpeedEstimator()
+        self.ball_speed_estimator = BallSpeedEstimator()
         self._calibration_invalid_since: Optional[float] = None
         self._failure_reset_done = False
         
@@ -170,6 +171,7 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
                 prolonged_failure and not self._failure_reset_done
             ):
                 self.speed_estimator.reset()
+                self.ball_speed_estimator.reset()
                 self.ball_tracker.reset()
                 self._failure_reset_done = True
 
@@ -202,6 +204,11 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
                     all_tracks['object'],
                     float(timestamp),
                     projection_usable=calibration.speed_usable,
+                )
+                all_tracks['object'] = self.ball_speed_estimator.calculate_speed(
+                    all_tracks['object'],
+                    float(timestamp),
+                    calibration,
                 )
             
             # Save tracking information if saving is enabled
@@ -319,8 +326,21 @@ class FootballVideoProcessor(AbstractAnnotator, AbstractVideoProcessor):
         text_x = gap_x + 15
         text_y = gap_y + 30
 
-        # Display "Possession" above the progress bar
-        cv2.putText(frame, 'Possession:', (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, .7, (255, 255, 255), 1)
+        # Display the currently assigned team, or make uncertainty explicit.
+        current_possession = self.ball_to_player_assigner.get_current_possession()
+        if current_possession == -1:
+            possession_label = "Possession: Unconfirmed"
+        else:
+            possession_label = f"Possession: {current_possession}"
+        cv2.putText(
+            frame,
+            possession_label,
+            (text_x, text_y),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            .7,
+            (255, 255, 255),
+            1,
+        )
 
         # Position and size for the possession bar (20px margin)
         bar_x = text_x

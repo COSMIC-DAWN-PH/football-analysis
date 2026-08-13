@@ -244,14 +244,24 @@ class BallTracker:
         self,
         geometry: PitchGeometry,
         maximum_prediction_seconds: float = 0.5,
+        restart_gap_seconds: float = 0.15,
+        confirmations_required: int = 3,
     ) -> None:
         self.geometry = geometry
         self.maximum_prediction_seconds = maximum_prediction_seconds
+        self.restart_gap_seconds = restart_gap_seconds
+        self.confirmations_required = confirmations_required
+        self.track_segment = 0
+        self._reset_motion_state()
+
+    def _reset_motion_state(self) -> None:
         self.image_filter = ConstantVelocityKalman(400.0, 16.0)
         self.metric_filter = ConstantVelocityKalman(16.0, 0.25)
         self.last_bbox_size = np.asarray([8.0, 8.0], dtype=np.float64)
         self.last_observed_timestamp: Optional[float] = None
         self.track_confidence = 0.0
+        self.confirmation_count = 0
+        self.segment_confirmed = False
 
     def update(
         self,
@@ -265,15 +275,40 @@ class BallTracker:
             timestamp_seconds, calibration
         )
         valid_candidates = self._metric_candidates(candidates, calibration)
+        observation_gap = (
+            None
+            if self.last_observed_timestamp is None
+            else timestamp_seconds - self.last_observed_timestamp
+        )
+        continuing_segment = (
+            observation_gap is not None
+            and observation_gap <= self.restart_gap_seconds
+        )
         selected = self._select_candidate(
             valid_candidates,
             predicted_center,
+            predicted_position,
             player_tracks,
             frame_shape,
+            observation_gap,
+            enforce_motion_gate=continuing_segment,
         )
-        if selected is not None:
+        if selected is not None and continuing_segment:
             candidate, position_m = selected
             return self._accept_observation(candidate, position_m, timestamp_seconds)
+        if valid_candidates:
+            restart = self._select_candidate(
+                valid_candidates,
+                predicted_center,
+                predicted_position,
+                player_tracks,
+                frame_shape,
+                observation_gap,
+                enforce_motion_gate=False,
+            )
+            if restart is not None:
+                candidate, position_m = restart
+                return self._start_segment(candidate, position_m, timestamp_seconds)
         return self._predicted_track(
             predicted_center, predicted_position, timestamp_seconds, calibration
         )
@@ -287,8 +322,8 @@ class BallTracker:
         predicted_position: Optional[np.ndarray] = None
         metric_prediction = self.metric_filter.predict(timestamp)
         if metric_prediction is not None and calibration.image_to_pitch is not None:
-            predicted_position = metric_prediction
-            if self.geometry.contains(tuple(predicted_position), margin_m=0.0):
+            if self.geometry.contains(tuple(metric_prediction), margin_m=0.0):
+                predicted_position = metric_prediction
                 try:
                     pitch_to_image = np.linalg.inv(calibration.image_to_pitch)
                     predicted_center = cv2.perspectiveTransform(
@@ -316,13 +351,22 @@ class BallTracker:
         self,
         candidates: list[tuple[BallCandidate, Optional[np.ndarray]]],
         predicted_center: Optional[np.ndarray],
+        predicted_position: Optional[np.ndarray],
         players: dict,
         frame_shape: tuple[int, ...],
+        observation_gap: Optional[float],
+        enforce_motion_gate: bool,
     ) -> Optional[tuple[BallCandidate, Optional[np.ndarray]]]:
         if not candidates:
             return None
         diagonal = hypot(frame_shape[1], frame_shape[0])
-        maximum_distance = max(100.0, diagonal * 0.10)
+        elapsed = max(float(observation_gap or 0.0), 1.0 / 30.0)
+        maximum_metric_distance = min(4.0, 0.75 + 40.0 * elapsed)
+        frame_intervals = max(1.0, elapsed * 30.0)
+        maximum_image_distance = min(
+            diagonal * 0.08,
+            diagonal * 0.03 * frame_intervals,
+        )
         player_feet = []
         for player_type in ("player", "goalkeeper"):
             for player in players.get(player_type, {}).values():
@@ -339,11 +383,16 @@ class BallTracker:
             if max(bbox_width, bbox_height) > maximum_size:
                 continue
             score = candidate.confidence
-            if predicted_center is not None:
-                distance = float(np.linalg.norm(center - predicted_center))
-                if distance > maximum_distance and candidate.confidence < 0.25:
+            if predicted_position is not None and position is not None:
+                distance = float(np.linalg.norm(position - predicted_position))
+                if enforce_motion_gate and distance > maximum_metric_distance:
                     continue
-                score -= 0.25 * min(distance / maximum_distance, 2.0)
+                score -= 0.35 * min(distance / maximum_metric_distance, 2.0)
+            elif predicted_center is not None:
+                distance = float(np.linalg.norm(center - predicted_center))
+                if enforce_motion_gate and distance > maximum_image_distance:
+                    continue
+                score -= 0.35 * min(distance / maximum_image_distance, 2.0)
             if player_feet:
                 nearest_player = min(float(np.linalg.norm(center - foot)) for foot in player_feet)
                 score += 0.10 * max(0.0, 1.0 - nearest_player / 150.0)
@@ -352,6 +401,16 @@ class BallTracker:
                 best_score = score
         return best
 
+    def _start_segment(
+        self,
+        candidate: BallCandidate,
+        position_m: Optional[np.ndarray],
+        timestamp: float,
+    ) -> dict[int, dict]:
+        self.track_segment += 1
+        self._reset_motion_state()
+        return self._accept_observation(candidate, position_m, timestamp)
+
     def _accept_observation(
         self,
         candidate: BallCandidate,
@@ -359,27 +418,42 @@ class BallTracker:
         timestamp: float,
     ) -> dict[int, dict]:
         center = np.asarray(candidate.center, dtype=np.float64)
-        self.image_filter.correct(center, timestamp)
+        filtered_center = self.image_filter.correct(center, timestamp)
+        filtered_position: Optional[np.ndarray] = None
         if position_m is not None:
-            self.metric_filter.correct(position_m, timestamp)
-        self.last_bbox_size = np.asarray(
+            filtered_position = self.metric_filter.correct(position_m, timestamp)
+        bbox_size = np.asarray(
             [candidate.bbox[2] - candidate.bbox[0], candidate.bbox[3] - candidate.bbox[1]],
             dtype=np.float64,
         )
+        self.last_bbox_size = bbox_size
         self.last_observed_timestamp = timestamp
         self.track_confidence = (
             candidate.confidence
             if self.track_confidence == 0
             else 0.7 * self.track_confidence + 0.3 * candidate.confidence
         )
+        self.confirmation_count += 1
+        self.segment_confirmed = self.confirmation_count >= self.confirmations_required
+        width, height = bbox_size
+        center_x, center_y = filtered_center
         track = {
-            "bbox": [float(value) for value in candidate.bbox],
+            "bbox": [
+                float(center_x - width / 2),
+                float(center_y - height / 2),
+                float(center_x + width / 2),
+                float(center_y + height / 2),
+            ],
             "confidence": candidate.confidence,
             "observed": True,
             "track_confidence": float(self.track_confidence),
+            "track_segment": self.track_segment,
+            "track_confirmed": self.segment_confirmed,
         }
-        if position_m is not None:
-            track["position_m"] = tuple(map(float, position_m))
+        if filtered_position is not None and self.geometry.contains(
+            tuple(filtered_position), margin_m=0.0
+        ):
+            track["position_m"] = tuple(map(float, filtered_position))
         return {1: track}
 
     def _predicted_track(
@@ -399,6 +473,7 @@ class BallTracker:
         x, y = center
         gap = timestamp - self.last_observed_timestamp
         confidence = self.track_confidence * exp(-gap / self.maximum_prediction_seconds)
+        confirmed = self.segment_confirmed and gap <= self.restart_gap_seconds
         track = {
             "bbox": [
                 float(x - width / 2),
@@ -409,10 +484,12 @@ class BallTracker:
             "confidence": float(confidence),
             "observed": False,
             "track_confidence": float(confidence),
+            "track_segment": self.track_segment,
+            "track_confirmed": confirmed,
         }
         if position_m is not None and calibration.image_to_pitch is not None:
             track["position_m"] = tuple(map(float, position_m))
         return {1: track}
 
     def reset(self) -> None:
-        self.__init__(self.geometry, self.maximum_prediction_seconds)
+        self._reset_motion_state()

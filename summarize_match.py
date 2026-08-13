@@ -18,15 +18,30 @@ from position_mappers import PitchGeometry
 TEAM_COLORS = {"Red": "#d82f45", "Blue": "#2764c7"}
 
 
-def parse_args() -> argparse.Namespace:
+def default_summary_dir(tracks_dir: Path) -> Path:
+    """Place summaries beside a conventional raw track directory."""
+    if tracks_dir.name.casefold() == "raw":
+        return tracks_dir.parent / "summary"
+    return tracks_dir / "summary"
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--tracks-dir", type=Path, required=True)
-    parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="Summary directory; defaults to a summary folder beside raw tracks",
+    )
     parser.add_argument("--fps", type=float, default=1.0)
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--pitch-length-m", type=float, required=True)
     parser.add_argument("--pitch-width-m", type=float, required=True)
-    return parser.parse_args()
+    args = parser.parse_args(argv)
+    if args.output_dir is None:
+        args.output_dir = default_summary_dir(args.tracks_dir)
+    return args
 
 
 def read_jsonl(path: Path) -> list[dict]:
