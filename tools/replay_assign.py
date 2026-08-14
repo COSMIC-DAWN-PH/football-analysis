@@ -41,11 +41,13 @@ def main() -> None:
     parser.add_argument("--club2-name", default="Navy")
     parser.add_argument("--club2-player", type=_rgb, default=(31, 72, 127))
     parser.add_argument("--club2-goalkeeper", type=_rgb, default=(80, 80, 80))
+    parser.add_argument("--referee-color", type=_rgb, default=None,
+                        help="Referee jersey reference color R,G,B")
     args = parser.parse_args()
 
     club1 = Club(args.club1_name, args.club1_player, args.club1_goalkeeper)
     club2 = Club(args.club2_name, args.club2_player, args.club2_goalkeeper)
-    assigner = ClubAssigner(club1, club2)
+    assigner = ClubAssigner(club1, club2, referee_color=args.referee_color)
 
     with open(args.tracks, encoding="utf-8") as f:
         lines = f.readlines()

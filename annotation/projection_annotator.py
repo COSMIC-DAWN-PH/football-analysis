@@ -71,6 +71,9 @@ class ProjectionAnnotator(AbstractAnnotator):
                     is_dark_color = is_color_dark(color)
 
                     if class_name in ['player', 'goalkeeper']:
+                        if track_info.get('referee'):
+                            self._draw_outline(frame, proj_pos, shape='dashed_circle', is_dark=is_dark_color)
+                            continue
                         shape = 'square' if class_name == 'goalkeeper' else 'circle'
                         self._draw_outline(frame, proj_pos, shape=shape, is_dark=is_dark_color)
 
@@ -84,7 +87,11 @@ class ProjectionAnnotator(AbstractAnnotator):
                             cv2.rectangle(frame, top_left, bottom_right, color=color, thickness=-1)
 
                     elif class_name == 'referee':
-                        self._draw_outline(frame, proj_pos, shape='dashed_circle', is_dark=is_dark_color)
+                        if track_info.get('club') is not None:
+                            cv2.circle(frame, (int(proj_pos[0]), int(proj_pos[1])), radius=10, color=color, thickness=-1)
+                            self._draw_outline(frame, proj_pos, shape='circle', is_dark=is_dark_color)
+                        else:
+                            self._draw_outline(frame, proj_pos, shape='dashed_circle', is_dark=is_dark_color)
 
         if 'ball' in tracks:
             for track_id, track_info in tracks['ball'].items():
@@ -116,6 +123,8 @@ class ProjectionAnnotator(AbstractAnnotator):
         for class_name in ['player', 'goalkeeper']:
             track_data = tracks.get(class_name, {})
             for track_id, track_info in track_data.items():
+                if track_info.get('referee'):
+                    continue
                 projection = track_info.get('projection')
                 if projection is None:
                     continue

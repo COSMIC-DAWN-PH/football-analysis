@@ -16,6 +16,7 @@ from club_assignment import Club, ClubAssigner  # noqa: E402
 
 MAROON_RGB = (120, 37, 66)
 NAVY_RGB = (31, 72, 127)
+YELLOW_RGB = (255, 220, 30)
 
 
 def make_frame(players, size=(1280, 720)):
@@ -147,3 +148,97 @@ def test_low_confidence_crop_yields_none():
     frame = make_frame([])  # empty pitch
     bbox = (600, 350, 615, 365)  # tiny far-away bbox, mostly grass
     assert assigner.get_jersey_color(frame, bbox, 0) is None
+
+
+def _make_assigner():
+    return ClubAssigner(Club("Maroon", MAROON_RGB, (80, 80, 80)),
+                        Club("Navy", NAVY_RGB, (80, 80, 80)))
+
+
+def test_yellow_player_flagged_as_referee():
+    assigner = _make_assigner()
+    players = make_players([MAROON_RGB, NAVY_RGB])
+    players.append(((600, 300, 655, 420), YELLOW_RGB))
+    frame = make_frame(players)
+    tracks = {
+        "player": {i: {"bbox": list(bbox)} for i, (bbox, _rgb) in enumerate(players)},
+        "goalkeeper": {},
+        "referee": {},
+    }
+    out = None
+    for _ in range(35):
+        out = assigner.assign_clubs(frame, tracks)
+    yellow_id = len(players) - 1
+    assert out["player"][yellow_id].get("referee") is True
+    assert out["player"][yellow_id].get("club") is None
+    for i in range(len(players) - 1):
+        expected = "Maroon" if i < 5 else "Navy"
+        assert out["player"][i]["club"] == expected, f"player {i} misassigned"
+
+
+def test_referee_track_with_club_color_restored():
+    assigner = _make_assigner()
+    players = make_players([MAROON_RGB, NAVY_RGB])
+    players.append(((600, 300, 655, 420), NAVY_RGB))  # navy player in referee class
+    frame = make_frame(players)
+    tracks = {
+        "player": {i: {"bbox": list(bbox)} for i, (bbox, _rgb) in enumerate(players[:-1])},
+        "goalkeeper": {},
+        "referee": {0: {"bbox": list(players[-1][0])}},
+    }
+    out = None
+    for _ in range(35):
+        out = assigner.assign_clubs(frame, tracks)
+    assert out["referee"][0]["club"] == "Navy"
+
+
+def test_yellow_referee_track_stays_referee():
+    assigner = _make_assigner()
+    players = make_players([MAROON_RGB, NAVY_RGB])
+    players.append(((600, 300, 655, 420), YELLOW_RGB))  # real referee
+    frame = make_frame(players)
+    tracks = {
+        "player": {i: {"bbox": list(bbox)} for i, (bbox, _rgb) in enumerate(players[:-1])},
+        "goalkeeper": {},
+        "referee": {0: {"bbox": list(players[-1][0])}},
+    }
+    out = None
+    for _ in range(35):
+        out = assigner.assign_clubs(frame, tracks)
+    assert out["referee"][0].get("club") is None
+    assert out["referee"][0].get("referee", True) is not False
+
+
+def test_club_players_never_flagged_referee():
+    assigner = _make_assigner()
+    players = make_players([MAROON_RGB, NAVY_RGB])
+    tracks = {
+        "player": {i: {"bbox": list(bbox)} for i, (bbox, _rgb) in enumerate(players)},
+        "goalkeeper": {},
+        "referee": {},
+    }
+    for _ in range(35):
+        frame = make_frame(players)
+        out = assigner.assign_clubs(frame, tracks)
+        for i in tracks["player"]:
+            assert not out["player"][i].get("referee"), f"player {i} wrongly flagged"
+
+
+def test_referee_flag_recovers_after_jersey_change():
+    assigner = _make_assigner()
+    yellow_frames = [make_frame([((500, 300, 555, 420), YELLOW_RGB)])
+                     for _ in range(40)]
+    navy_frames = [make_frame([((500, 300, 555, 420), NAVY_RGB)])
+                   for _ in range(80)]
+    tracks = {
+        "player": {0: {"bbox": [500, 300, 555, 420]}},
+        "goalkeeper": {},
+        "referee": {},
+    }
+    for frame in yellow_frames:
+        out = assigner.assign_clubs(frame, tracks)
+    assert out["player"][0].get("referee") is True
+    for frame in navy_frames:
+        out = assigner.assign_clubs(frame, tracks)
+    assert out["player"][0].get("club") == "Navy"
+    assert not out["player"][0].get("referee"), "referee flag must clear after jersey change"

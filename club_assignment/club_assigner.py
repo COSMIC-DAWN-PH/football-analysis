@@ -7,7 +7,9 @@ import cv2
 from typing import Tuple, Dict, Any, Optional, List
 
 class ClubAssigner:
-    def __init__(self, club1: Club, club2: Club, images_to_save: int = 0, images_save_path: Optional[str] = None) -> None:
+    def __init__(self, club1: Club, club2: Club, images_to_save: int = 0, images_save_path: Optional[str] = None,
+                 referee_assign_dist: float = 75.0, referee_color: Optional[Tuple[int, int, int]] = None,
+                 referee_match_dist: float = 75.0) -> None:
         """
         Initializes the ClubAssigner with club information and image saving parameters.
 
@@ -16,10 +18,19 @@ class ClubAssigner:
             club2 (Club): The second club object.
             images_to_save (int): The number of images to save for analysis.
             images_save_path (Optional[str]): The directory path to save images.
+            referee_assign_dist (float): Maximum weighted HSV distance to a club
+                reference for a sample to be assigned to that club; farther
+                samples are referee candidates.
+            referee_color (Optional[Tuple[int, int, int]]): RGB reference color
+                of the referee jersey. When given, a sample whose weighted HSV
+                distance to this reference is smaller than its distance to both
+                club references (and within `referee_match_dist`) is a referee.
+            referee_match_dist (float): Maximum weighted HSV distance to the
+                referee reference for a referee assignment.
         """
         self.club1 = club1
         self.club2 = club2
-        self.model = ClubAssignerModel(self.club1, self.club2)
+        self.model = ClubAssignerModel(self.club1, self.club2, referee_assign_dist, referee_color, referee_match_dist)
         self.club_colors: Dict[str, Any] = {
             club1.name: club1.player_jersey_color,
             club2.name: club2.player_jersey_color
@@ -32,6 +43,9 @@ class ClubAssigner:
         self.frame_cluster_min_samples = 4
         self.cluster_separation_min_deg = 25.0
         self.vote_window = 60
+        self.referee_assign_dist = float(referee_assign_dist)
+        self.referee_color = referee_color
+        self.referee_match_dist = float(referee_match_dist)
         self.club_by_track: Dict[Tuple[str, int], str] = {}
         self.votes_by_track: Dict[Tuple[str, int], deque] = {}
         self.player_ref_hues: Dict[str, float] = {
@@ -125,46 +139,69 @@ class ClubAssigner:
 
         return labels, centers
 
-    def _frame_cluster_map(
+    def _assign_frame(
         self,
         items: List[Tuple[Tuple[str, int], float, float, float, int]],
     ) -> Dict[Tuple[str, int], str]:
         """
-        Cluster all players of the current frame into two hue groups and map
-        each group to a club via the configured reference jersey colors.
+        Assign every sample of the current frame to a club name or 'referee'.
+
+        Referee candidates are samples whose weighted HSV distance to BOTH club
+        references exceeds `referee_assign_dist`; they vote 'referee' directly
+        and the per-track sliding window requires a consistent majority before
+        a player is flagged as a referee, absorbing single-frame noise. The
+        remaining club samples are clustered into two hue groups and mapped to
+        clubs via the configured reference jersey colors.
 
         Args:
             items: List of (cache_key, median_hue, median_sat, median_val, n_pixels).
 
         Returns:
-            Dict mapping cache_key to club name.
+            Dict mapping cache_key to a club name or 'referee'. Abstained keys
+            are absent.
         """
-        hues = np.array([it[1] for it in items], dtype=float)
-        weights = np.array([it[4] for it in items], dtype=float)
-        labels, centers = self._circular_2means(hues, weights)
-
-        center_hues = (np.rad2deg(np.arctan2(centers[:, 1], centers[:, 0])) % 360.0) / 2.0
-        refs = list(self.player_ref_hues.items())
-
         result: Dict[Tuple[str, int], str] = {}
-        separation = self._hue_dist(center_hues[0], center_hues[1])
-        if separation >= self.cluster_separation_min_deg:
-            nearest = [
-                min(range(2), key=lambda r: self._hue_dist(center_hues[i], refs[r][1]))
-                for i in range(2)
-            ]
-            if nearest[0] != nearest[1]:
-                mapping = {i: refs[nearest[i]][0] for i in range(2)}
-                for it, label in zip(items, labels):
-                    result[it[0]] = mapping[int(label)]
-                return result
 
-        # Clusters not separable (single team in frame) or mapping ambiguous:
-        # fall back to per-player nearest-reference classification.
+        referee_items: List[Tuple[Tuple[str, int], float, float, float, int]] = []
+        club_items: List[Tuple[Tuple[str, int], float, float, float, int]] = []
         for it in items:
             color = self._stats_to_rgb(it[1], it[2], it[3])
-            pred = self.model.predict(color, is_goalkeeper=False)
-            result[it[0]] = list(self.club_colors.keys())[pred]
+            if self.model.predict_referee(color, is_goalkeeper=False) is None:
+                referee_items.append(it)
+            else:
+                club_items.append(it)
+
+        for it in referee_items:
+            result[it[0]] = "referee"
+
+        if len(club_items) >= self.frame_cluster_min_samples:
+            hues = np.array([it[1] for it in club_items], dtype=float)
+            weights = np.array([it[4] for it in club_items], dtype=float)
+            labels, centers = self._circular_2means(hues, weights)
+
+            center_hues = (np.rad2deg(np.arctan2(centers[:, 1], centers[:, 0])) % 360.0) / 2.0
+            refs = list(self.player_ref_hues.items())
+
+            separation = self._hue_dist(center_hues[0], center_hues[1])
+            if separation >= self.cluster_separation_min_deg:
+                nearest = [
+                    min(range(2), key=lambda r: self._hue_dist(center_hues[i], refs[r][1]))
+                    for i in range(2)
+                ]
+                if nearest[0] != nearest[1]:
+                    mapping = {i: refs[nearest[i]][0] for i in range(2)}
+                    for it, label in zip(club_items, labels):
+                        result[it[0]] = mapping[int(label)]
+                    return result
+
+        # Clusters not separable (single team in frame) or mapping ambiguous:
+        # fall back to per-sample nearest-reference classification with a
+        # referee rejection threshold.
+        for it in club_items:
+            color = self._stats_to_rgb(it[1], it[2], it[3])
+            pred = self.model.predict_referee(color, is_goalkeeper=False)
+            if pred is not None:
+                result[it[0]] = list(self.club_colors.keys())[pred]
         return result
 
     def apply_mask(self, image: np.ndarray) -> np.ndarray:
@@ -310,7 +347,15 @@ class ClubAssigner:
 
     def assign_clubs(self, frame: np.ndarray, tracks: Dict[str, Dict[int, Any]]) -> Dict[str, Dict[int, Any]]:
         """
-        Assign clubs to players and goalkeepers based on their jersey colors.
+        Assign clubs to players, goalkeepers, and referee-class tracks based on
+        their jersey colors.
+
+        Referee-class tracks are classified with the same color logic as
+        players: when their jersey matches a club reference they are restored
+        to that club (drawn as a club player); when they stay far from both
+        club colors they keep the referee identity. Player-class tracks whose
+        color is far from both clubs (e.g. a yellow referee misdetected as a
+        player) are flagged as referees and lose their club color.
 
         Args:
             frame (np.ndarray): The current video frame.
@@ -322,7 +367,8 @@ class ClubAssigner:
         tracks = tracks.copy()
 
         samples: List[Tuple[Tuple[str, int], str, Tuple[float, float, float, int]]] = []
-        for track_type in ['goalkeeper', 'player']:
+        for track_type in ['goalkeeper', 'player', 'referee']:
+            tracks.setdefault(track_type, {})
             for player_id, track in tracks[track_type].items():
                 cache_key = (track_type, player_id)
                 stats = self.extract_jersey_stats(frame, track['bbox'])
@@ -333,7 +379,7 @@ class ClubAssigner:
                 samples.append((cache_key, track_type, stats))
 
         if samples:
-            player_items = [s for s in samples if s[1] == 'player']
+            player_items = [s for s in samples if s[1] != 'goalkeeper']
             goalkeeper_items = [s for s in samples if s[1] == 'goalkeeper']
 
             frame_decisions: Dict[Tuple[str, int], str] = {}
@@ -342,12 +388,15 @@ class ClubAssigner:
                     (key, stats[0], stats[1], stats[2], stats[3])
                     for key, _, stats in player_items
                 ]
-                frame_decisions.update(self._frame_cluster_map(frame_items))
+                frame_decisions.update(self._assign_frame(frame_items))
             else:
                 for key, _, stats in player_items:
                     color = self._stats_to_rgb(stats[0], stats[1], stats[2])
-                    pred = self.model.predict(color, is_goalkeeper=False)
-                    frame_decisions[key] = list(self.club_colors.keys())[pred]
+                    pred = self.model.predict_referee(color, is_goalkeeper=False)
+                    if pred is None:
+                        frame_decisions[key] = "referee"
+                    else:
+                        frame_decisions[key] = list(self.club_colors.keys())[pred]
 
             for key, _, stats in goalkeeper_items:
                 color = self._stats_to_rgb(stats[0], stats[1], stats[2])
@@ -364,29 +413,49 @@ class ClubAssigner:
                 self.club_by_track[cache_key] = Counter(window).most_common(1)[0][0]
 
         # Write the current majority club (or keep previous) for every track.
-        for track_type in ['goalkeeper', 'player']:
-            for player_id, track in tracks[track_type].items():
+        for track_type in ['goalkeeper', 'player', 'referee']:
+            for player_id, track in tracks.setdefault(track_type, {}).items():
                 cache_key = (track_type, player_id)
-                club = self.club_by_track.get(cache_key)
-                if club is not None:
-                    tracks[track_type][player_id]['club'] = club
-                    tracks[track_type][player_id]['club_color'] = self.club_colors[club]
+                vote = self.club_by_track.get(cache_key)
+                if vote is None:
+                    continue
+                if vote == 'referee':
+                    track['referee'] = True
+                    track.pop('club', None)
+                    track.pop('club_color', None)
+                else:
+                    track['club'] = vote
+                    track['club_color'] = self.club_colors[vote]
+                    track.pop('referee', None)
 
         return tracks
 
 class ClubAssignerModel:
-    def __init__(self, club1: Club, club2: Club) -> None:
+    def __init__(self, club1: Club, club2: Club, referee_assign_dist: float = 75.0,
+                 referee_color: Optional[Tuple[int, int, int]] = None,
+                 referee_match_dist: float = 75.0) -> None:
         """
         Initializes the ClubAssignerModel with jersey colors for the clubs.
 
         Args:
             club1 (Club): The first club object.
             club2 (Club): The second club object.
+            referee_assign_dist (float): Maximum weighted HSV distance to a club
+                reference for a club assignment; farther colors are referees.
+            referee_color (Optional[Tuple[int, int, int]]): RGB reference color
+                of the referee jersey.
+            referee_match_dist (float): Maximum weighted HSV distance to the
+                referee reference for a referee assignment.
         """
         self.player_centroids = np.array([club1.player_jersey_color, club2.player_jersey_color])
         self.goalkeeper_centroids = np.array([club1.goalkeeper_jersey_color, club2.goalkeeper_jersey_color])
         self.player_hsv = np.array([self._rgb_to_hsv(c) for c in self.player_centroids])
         self.goalkeeper_hsv = np.array([self._rgb_to_hsv(c) for c in self.goalkeeper_centroids])
+        self.referee_assign_dist = float(referee_assign_dist)
+        self.referee_match_dist = float(referee_match_dist)
+        self.referee_hsv = (
+            np.array(self._rgb_to_hsv(referee_color)) if referee_color is not None else None
+        )
 
     @staticmethod
     def _rgb_to_hsv(color: Tuple[int, int, int]) -> Tuple[float, float, float]:
@@ -428,3 +497,41 @@ class ClubAssignerModel:
         distances = np.array([self._hsv_distance(hsv, r) for r in reference])
         
         return int(np.argmin(distances))
+
+    def predict_referee(
+        self, extracted_color: Tuple[int, int, int], is_goalkeeper: bool = False
+    ) -> Optional[int]:
+        """
+        Predict the club for a jersey color, or return None when the color is
+        a referee color rather than a club color.
+
+        With a configured referee reference color, a sample is a referee when
+        its weighted HSV distance to the referee reference is smaller than its
+        distance to both club references and within `referee_match_dist`.
+        Without a referee reference, a sample is a referee when it is farther
+        than `referee_assign_dist` from both club references.
+
+        Args:
+            extracted_color (Tuple[int, int, int]): The extracted jersey color in RGB format.
+            is_goalkeeper (bool): Flag to indicate if the color is for a goalkeeper.
+
+        Returns:
+            Optional[int]: The predicted club index (0 or 1), or None for a referee.
+        """
+        if is_goalkeeper:
+            reference = self.goalkeeper_hsv
+        else:
+            reference = self.player_hsv
+
+        hsv = self._rgb_to_hsv(extracted_color)
+        distances = np.array([self._hsv_distance(hsv, r) for r in reference])
+        best = int(np.argmin(distances))
+
+        if self.referee_hsv is not None:
+            d_ref = float(self._hsv_distance(hsv, self.referee_hsv))
+            if d_ref < float(distances[best]) and d_ref <= self.referee_match_dist:
+                return None
+
+        if float(distances[best]) > self.referee_assign_dist:
+            return None
+        return best
