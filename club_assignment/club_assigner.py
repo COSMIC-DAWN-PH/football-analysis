@@ -1,7 +1,6 @@
 from .club import Club
 
 import os
-from sklearn.cluster import KMeans
 import numpy as np
 import cv2
 from typing import Tuple, Dict, Any, Optional
@@ -28,7 +27,7 @@ class ClubAssigner:
             club1.name: club1.goalkeeper_jersey_color,
             club2.name: club2.goalkeeper_jersey_color
         }
-        self.kmeans = KMeans(n_clusters=2, init='k-means++', n_init=10, random_state=42)
+        self.min_jersey_pixels = 30
         self.club_by_track: Dict[Tuple[str, int], str] = {}
 
         # Saving images for analysis
@@ -44,17 +43,15 @@ class ClubAssigner:
         
             self.saved_images = len([name for name in os.listdir(self.output_dir) if name.startswith('player')])
 
-    def apply_mask(self, image: np.ndarray, green_threshold: float = 0.08) -> np.ndarray:
+    def apply_mask(self, image: np.ndarray) -> np.ndarray:
         """
-        Apply a mask to an image based on green color in HSV space. 
-        If the mask covers more than green_threshold of the image, apply the inverse of the mask.
+        Remove pitch-green background pixels from a player crop.
 
         Args:
             image (np.ndarray): An image to apply the mask to.
-            green_threshold (float): Threshold for green color coverage.
 
         Returns:
-            np.ndarray: The masked image.
+            np.ndarray: The masked image (green pixels set to black).
         """
         hsv_img = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
@@ -62,53 +59,57 @@ class ClubAssigner:
         lower_green = np.array([36, 25, 25])
         upper_green = np.array([86, 255, 255])
 
-        # Create the mask
-        mask = cv2.inRange(hsv_img, lower_green, upper_green)
+        # Create the mask and keep only non-green pixels
+        mask = cv2.bitwise_not(cv2.inRange(hsv_img, lower_green, upper_green))
+        return cv2.bitwise_and(image, image, mask=mask)
 
-        # Count the number of masked pixels
-        total_pixels = image.shape[0] * image.shape[1]
-        masked_pixels = cv2.countNonZero(cv2.bitwise_not(mask))
-        mask_percentage = masked_pixels / total_pixels
-        
-        if mask_percentage > green_threshold:
-            # Apply inverse mask
-            return cv2.bitwise_and(image, image, mask=cv2.bitwise_not(mask))
-        else:
-            # Apply normal mask
-            return image
-
-    def clustering(self, img: np.ndarray) -> Tuple[int, int, int]:
+    def extract_jersey_stats(
+        self,
+        frame: np.ndarray,
+        bbox: Tuple[int, int, int, int],
+    ) -> Optional[Tuple[float, float, float, int]]:
         """
-        Perform K-Means clustering on an image to identify the dominant jersey color.
+        Extract robust jersey color statistics from a player's torso band.
+
+        Samples the central torso band of the bounding box (avoids head,
+        legs and bbox-edge background), removes green and shadowed pixels,
+        and returns the median hue/saturation/value plus the number of
+        valid pixels.
 
         Args:
-            img (np.ndarray): The input image.
+            frame (np.ndarray): The current video frame.
+            bbox (Tuple[int, int, int, int]): The bounding box coordinates (x1, y1, x2, y2).
 
         Returns:
-            Tuple[int, int, int]: The jersey color in BGR format.
+            Optional[Tuple[float, float, float, int]]: (median_hue, median_sat, median_val, n_pixels)
+            or None if the crop is empty.
         """
-        # Reshape image to 2D array
-        img_reshape = img.reshape(-1, 3)
-        
-        # K-Means clustering
-        self.kmeans.fit(img_reshape)
-        
-        # Get Cluster Labels
-        labels = self.kmeans.labels_
-        
-        # Reshape the labels into the image shape
-        cluster_img = labels.reshape(img.shape[0], img.shape[1])
+        x1, y1, x2, y2 = (int(v) for v in bbox)
+        img = frame[y1:y2, x1:x2]
+        if img.size == 0:
+            return None
 
-        # Get Jersey Color
-        corners = [cluster_img[0, 0], cluster_img[0, -1], cluster_img[-1, 0], cluster_img[-1, -1]]
-        bg_cluster = max(set(corners), key=corners.count)
+        h, w = img.shape[:2]
+        # Torso band: horizontal 20%-80%, vertical 30%-60% of the bbox
+        band = img[int(h * 0.30):int(h * 0.60), int(w * 0.20):int(w * 0.80)]
+        if band.size == 0:
+            return None
 
-        # The other cluster is a player cluster
-        player_cluster = 1 - bg_cluster
+        masked = self.apply_mask(band)
+        hsv = cv2.cvtColor(masked, cv2.COLOR_BGR2HSV)
+        hue, sat, val = hsv[..., 0], hsv[..., 1], hsv[..., 2]
 
-        jersey_color_bgr = self.kmeans.cluster_centers_[player_cluster]
-        
-        return (int(jersey_color_bgr[2]), int(jersey_color_bgr[1]), int(jersey_color_bgr[0]))
+        # Keep only colored, non-shadowed jersey pixels
+        keep = (sat >= 60) & (val >= 50)
+        if not keep.any():
+            return (0.0, 0.0, 0.0, 0)
+
+        return (
+            float(np.median(hue[keep])),
+            float(np.median(sat[keep])),
+            float(np.median(val[keep])),
+            int(keep.sum()),
+        )
 
     def save_player_image(self, img: np.ndarray, player_id: int, is_goalkeeper: bool = False) -> None:
         """
@@ -129,7 +130,7 @@ class ClubAssigner:
         # Increment the count of saved images
         self.saved_images += 1
 
-    def get_jersey_color(self, frame: np.ndarray, bbox: Tuple[int, int, int, int], player_id: int, is_goalkeeper: bool = False) -> Tuple[int, int, int]:
+    def get_jersey_color(self, frame: np.ndarray, bbox: Tuple[int, int, int, int], player_id: int, is_goalkeeper: bool = False) -> Optional[Tuple[int, int, int]]:
         """
         Extract the jersey color from a player's bounding box in the frame.
 
@@ -140,7 +141,8 @@ class ClubAssigner:
             is_goalkeeper (bool): Flag to indicate if the player is a goalkeeper.
 
         Returns:
-            Tuple[int, int, int]: The jersey color in BGR format.
+            Optional[Tuple[int, int, int]]: The jersey color in RGB format, or None if
+            there are not enough reliable jersey pixels in this frame.
         """
         # Save player images only if needed
         if self.saved_images < self.images_to_save:
@@ -148,14 +150,19 @@ class ClubAssigner:
             img_top = img[0:img.shape[0] // 2, :] 
             self.save_player_image(img_top, player_id, is_goalkeeper)  # Pass is_goalkeeper here
 
-        img = frame[int(bbox[1]):int(bbox[3]), int(bbox[0]):int(bbox[2])]
-        img_top = img[0:img.shape[0] // 2, :]  # Use upper half for jersey detection
-        masked_img_top = self.apply_mask(img_top, green_threshold=0.08)
-        jersey_color = self.clustering(masked_img_top)
-        
-        return jersey_color
+        stats = self.extract_jersey_stats(frame, bbox)
+        if stats is None:
+            return None
 
-    def get_player_club(self, frame: np.ndarray, bbox: Tuple[int, int, int, int], player_id: int, is_goalkeeper: bool = False) -> Tuple[str, int]:
+        median_hue, median_sat, median_val, n_pixels = stats
+        if n_pixels < self.min_jersey_pixels:
+            return None
+
+        hsv = np.uint8([[[median_hue, median_sat, median_val]]])
+        bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0, 0]
+        return (int(bgr[2]), int(bgr[1]), int(bgr[0]))
+
+    def get_player_club(self, frame: np.ndarray, bbox: Tuple[int, int, int, int], player_id: int, is_goalkeeper: bool = False) -> Tuple[Optional[str], Optional[int]]:
         """
         Determine the club associated with a player based on their jersey color.
 
@@ -166,9 +173,13 @@ class ClubAssigner:
             is_goalkeeper (bool): Flag to indicate if the player is a goalkeeper.
 
         Returns:
-            Tuple[str, int]: The club name and the predicted class index.
+            Tuple[Optional[str], Optional[int]]: The club name and the predicted class
+            index, or (None, None) if the jersey color is not reliable in this frame.
         """
         color = self.get_jersey_color(frame, bbox, player_id, is_goalkeeper)
+        if color is None:
+            return None, None
+
         pred = self.model.predict(color, is_goalkeeper)
         
         return list(self.club_colors.keys())[pred], pred
@@ -194,6 +205,10 @@ class ClubAssigner:
                     bbox = track['bbox']
                     is_goalkeeper = (track_type == 'goalkeeper')
                     club, _ = self.get_player_club(frame, bbox, player_id, is_goalkeeper)
+                    if club is None:
+                        # Not enough reliable jersey pixels this frame; keep
+                        # the track unassigned and retry on a later frame.
+                        continue
                     self.club_by_track[cache_key] = club
                 
                 tracks[track_type][player_id]['club'] = club
