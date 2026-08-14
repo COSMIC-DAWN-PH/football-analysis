@@ -64,10 +64,11 @@ def main() -> None:
             break
         d = json.loads(lines[fi])
         d = assigner.assign_clubs(frame, d)
-        # Mirror the live pipeline: tracks not yet assigned carry no club field
+        # Mirror the live pipeline: tracks with no votes carry no club field
         for track_type in ("player", "goalkeeper"):
             for player_id, tr in d.get(track_type, {}).items():
-                if (track_type, player_id) not in assigner.club_by_track:
+                key = (track_type, player_id)
+                if key not in assigner.club_by_track and key not in assigner.votes_by_track:
                     tr.pop("club", None)
                     tr.pop("club_color", None)
         out_lines.append(json.dumps(d, ensure_ascii=False))

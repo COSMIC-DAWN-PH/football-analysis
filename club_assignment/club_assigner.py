@@ -1,7 +1,7 @@
 from .club import Club
 
 import os
-from sklearn.cluster import KMeans
+from collections import Counter, deque
 import numpy as np
 import cv2
 from typing import Tuple, Dict, Any, Optional, List
@@ -31,7 +31,9 @@ class ClubAssigner:
         self.min_jersey_pixels = 30
         self.frame_cluster_min_samples = 4
         self.cluster_separation_min_deg = 25.0
+        self.vote_window = 60
         self.club_by_track: Dict[Tuple[str, int], str] = {}
+        self.votes_by_track: Dict[Tuple[str, int], deque] = {}
         self.player_ref_hues: Dict[str, float] = {
             name: self._rgb_to_hue(color) for name, color in self.club_colors.items()
         }
@@ -67,6 +69,62 @@ class ClubAssigner:
         bgr = cv2.cvtColor(np.uint8([[[hue, sat, val]]]), cv2.COLOR_HSV2BGR)[0, 0]
         return (int(bgr[2]), int(bgr[1]), int(bgr[0]))
 
+    @staticmethod
+    def _circular_2means(
+        hues: np.ndarray,
+        weights: np.ndarray,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Deterministic 2-means on circular hue data (sin/cos embedding),
+        initialized with the farthest sample pair and refined with Lloyd
+        iterations. Handles the red hue wrap-around (0/180) naturally.
+
+        Args:
+            hues: Array of OpenCV hue values (0-180).
+            weights: Sample weights (e.g., valid pixel counts).
+
+        Returns:
+            Tuple of (labels array, 2x2 unit-vector cluster centers).
+        """
+        n = len(hues)
+        if n < 2:
+            return np.zeros(n, dtype=int), np.zeros((2, 2))
+
+        ang = np.deg2rad(hues * 2.0)
+        x = np.stack([np.cos(ang), np.sin(ang)], axis=1)
+
+        # Farthest-pair initialization (deterministic)
+        best = (0, 1, -1.0)
+        for i in range(n):
+            for j in range(i + 1, n):
+                dist = float(np.linalg.norm(x[i] - x[j]))
+                if dist > best[2]:
+                    best = (i, j, dist)
+        centers = np.stack([x[best[0]], x[best[1]]])
+
+        labels = np.zeros(n, dtype=int)
+        for _ in range(10):
+            new_labels = np.argmin(
+                np.stack(
+                    [np.linalg.norm(x - centers[0], axis=1),
+                     np.linalg.norm(x - centers[1], axis=1)],
+                    axis=1,
+                ),
+                axis=1,
+            )
+            if np.array_equal(new_labels, labels):
+                break
+            labels = new_labels
+            for k in range(2):
+                mask = labels == k
+                if mask.any():
+                    weighted = (x[mask] * weights[mask][:, None]).sum(axis=0)
+                    norm = np.linalg.norm(weighted)
+                    if norm > 1e-9:
+                        centers[k] = weighted / norm
+
+        return labels, centers
+
     def _frame_cluster_map(
         self,
         items: List[Tuple[Tuple[str, int], float, float, float, int]],
@@ -83,12 +141,8 @@ class ClubAssigner:
         """
         hues = np.array([it[1] for it in items], dtype=float)
         weights = np.array([it[4] for it in items], dtype=float)
-        ang = np.deg2rad(hues * 2.0)
-        x = np.stack([np.cos(ang), np.sin(ang)], axis=1)
-        kmeans = KMeans(n_clusters=2, init='k-means++', n_init=10, random_state=42)
-        kmeans.fit(x, sample_weight=weights)
+        labels, centers = self._circular_2means(hues, weights)
 
-        centers = kmeans.cluster_centers_
         center_hues = (np.rad2deg(np.arctan2(centers[:, 1], centers[:, 0])) % 360.0) / 2.0
         refs = list(self.player_ref_hues.items())
 
@@ -101,7 +155,7 @@ class ClubAssigner:
             ]
             if nearest[0] != nearest[1]:
                 mapping = {i: refs[nearest[i]][0] for i in range(2)}
-                for it, label in zip(items, kmeans.labels_):
+                for it, label in zip(items, labels):
                     result[it[0]] = mapping[int(label)]
                 return result
 
@@ -267,7 +321,49 @@ class ClubAssigner:
         """
         tracks = tracks.copy()
 
-        pending: List[Tuple[Tuple[str, int], str, Tuple[float, float, float, int]]] = []
+        samples: List[Tuple[Tuple[str, int], str, Tuple[float, float, float, int]]] = []
+        for track_type in ['goalkeeper', 'player']:
+            for player_id, track in tracks[track_type].items():
+                cache_key = (track_type, player_id)
+                stats = self.extract_jersey_stats(frame, track['bbox'])
+                if stats is None or stats[3] < self.min_jersey_pixels:
+                    # Not enough reliable jersey pixels this frame; keep the
+                    # previous majority as the displayed club.
+                    continue
+                samples.append((cache_key, track_type, stats))
+
+        if samples:
+            player_items = [s for s in samples if s[1] == 'player']
+            goalkeeper_items = [s for s in samples if s[1] == 'goalkeeper']
+
+            frame_decisions: Dict[Tuple[str, int], str] = {}
+            if len(player_items) >= self.frame_cluster_min_samples:
+                frame_items = [
+                    (key, stats[0], stats[1], stats[2], stats[3])
+                    for key, _, stats in player_items
+                ]
+                frame_decisions.update(self._frame_cluster_map(frame_items))
+            else:
+                for key, _, stats in player_items:
+                    color = self._stats_to_rgb(stats[0], stats[1], stats[2])
+                    pred = self.model.predict(color, is_goalkeeper=False)
+                    frame_decisions[key] = list(self.club_colors.keys())[pred]
+
+            for key, _, stats in goalkeeper_items:
+                color = self._stats_to_rgb(stats[0], stats[1], stats[2])
+                pred = self.model.predict(color, is_goalkeeper=True)
+                frame_decisions[key] = list(self.club_colors.keys())[pred]
+
+            for cache_key, club in frame_decisions.items():
+                window = self.votes_by_track.setdefault(
+                    cache_key, deque(maxlen=self.vote_window)
+                )
+                window.append(club)
+                # Running majority over the recent window; tracks identity
+                # switches or drifting colors with bounded latency.
+                self.club_by_track[cache_key] = Counter(window).most_common(1)[0][0]
+
+        # Write the current majority club (or keep previous) for every track.
         for track_type in ['goalkeeper', 'player']:
             for player_id, track in tracks[track_type].items():
                 cache_key = (track_type, player_id)
@@ -275,43 +371,6 @@ class ClubAssigner:
                 if club is not None:
                     tracks[track_type][player_id]['club'] = club
                     tracks[track_type][player_id]['club_color'] = self.club_colors[club]
-                    continue
-                stats = self.extract_jersey_stats(frame, track['bbox'])
-                if stats is None or stats[3] < self.min_jersey_pixels:
-                    # Not enough reliable jersey pixels this frame; keep
-                    # the track unassigned and retry on a later frame.
-                    continue
-                pending.append((cache_key, track_type, stats))
-
-        if not pending:
-            return tracks
-
-        player_items = [p for p in pending if p[1] == 'player']
-        goalkeeper_items = [p for p in pending if p[1] == 'goalkeeper']
-
-        decided: Dict[Tuple[str, int], str] = {}
-        if len(player_items) >= self.frame_cluster_min_samples:
-            frame_items = [
-                (key, stats[0], stats[1], stats[2], stats[3])
-                for key, _, stats in player_items
-            ]
-            decided.update(self._frame_cluster_map(frame_items))
-        else:
-            for key, _, stats in player_items:
-                color = self._stats_to_rgb(stats[0], stats[1], stats[2])
-                pred = self.model.predict(color, is_goalkeeper=False)
-                decided[key] = list(self.club_colors.keys())[pred]
-
-        for key, _, stats in goalkeeper_items:
-            color = self._stats_to_rgb(stats[0], stats[1], stats[2])
-            pred = self.model.predict(color, is_goalkeeper=True)
-            decided[key] = list(self.club_colors.keys())[pred]
-
-        for cache_key, club in decided.items():
-            self.club_by_track[cache_key] = club
-            track_type, player_id = cache_key
-            tracks[track_type][player_id]['club'] = club
-            tracks[track_type][player_id]['club_color'] = self.club_colors[club]
 
         return tracks
 

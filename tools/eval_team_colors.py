@@ -17,6 +17,7 @@ Usage:
 import argparse
 import collections
 import json
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -41,17 +42,6 @@ def main() -> None:
     with open(args.tracks, encoding="utf-8") as f:
         track_lines = f.readlines()
 
-    def assigned_club(frame_idx: int, track_id: int):
-        try:
-            d = json.loads(track_lines[frame_idx])
-        except IndexError:
-            return None
-        player = d.get("player", {})
-        tr = player.get(str(track_id)) or player.get(track_id)
-        if tr is None:
-            return None
-        return tr.get("club")
-
     # ground-truth per track: use manually labeled crops, one label per track
     track_truth = {}
     ambiguous = []
@@ -70,32 +60,6 @@ def main() -> None:
 
     if ambiguous:
         print("WARNING: conflicting manual labels within track:", ambiguous)
-
-    # confusion matrix: truth -> pipeline assignment
-    conf = collections.Counter()
-    per_track = {}
-    for pid, truth in sorted(track_truth.items(), key=lambda kv: int(kv[0])):
-        frame_idx = next(
-            m["frame"] for m in labels["crops"].values() if m["track_id"] == pid
-        )
-        assigned = assigned_club(frame_idx, pid)
-        per_track[pid] = {"truth": truth, "assigned": assigned,
-                          "correct": truth == assigned}
-        conf[(truth, assigned)] += 1
-
-    n_correct = sum(1 for v in per_track.values() if v["correct"])
-    n_total = len(per_track)
-    recalls = {}
-    for team in ("Maroon", "Navy"):
-        team_tracks = [v for v in per_track.values() if v["truth"] == team]
-        recalls[team] = (
-            sum(1 for v in team_tracks if v["correct"]) / len(team_tracks)
-            if team_tracks else None
-        )
-    balanced = (
-        sum(r for r in recalls.values() if r is not None)
-        / sum(1 for r in recalls.values() if r is not None)
-    )
 
     # coverage: fraction of player track-frame entries with club assigned
     total_entries = 0
@@ -118,11 +82,47 @@ def main() -> None:
                 track_clubs[pid].append(c)
     flips = 0
     stable = 0
+    frames_to_stable = []
     for pid, seq in track_clubs.items():
         track_flips = sum(1 for a, b in zip(seq, seq[1:]) if a != b)
         flips += track_flips
         if track_flips == 0:
             stable += 1
+        last_flip = max(
+            (i for i in range(1, len(seq)) if seq[i] != seq[i - 1]),
+            default=0,
+        )
+        frames_to_stable.append(last_flip)
+
+    # per-track final assignment: mode of club across frames
+    track_mode = {
+        pid: collections.Counter(seq).most_common(1)[0][0]
+        for pid, seq in track_clubs.items()
+        if seq
+    }
+
+    # confusion matrix: truth -> pipeline final assignment
+    conf = collections.Counter()
+    per_track = {}
+    for pid, truth in sorted(track_truth.items(), key=lambda kv: int(kv[0])):
+        assigned = track_mode.get(str(pid), track_mode.get(pid))
+        per_track[pid] = {"truth": truth, "assigned": assigned,
+                          "correct": truth == assigned}
+        conf[(truth, assigned)] += 1
+
+    n_correct = sum(1 for v in per_track.values() if v["correct"])
+    n_total = len(per_track)
+    recalls = {}
+    for team in ("Maroon", "Navy"):
+        team_tracks = [v for v in per_track.values() if v["truth"] == team]
+        recalls[team] = (
+            sum(1 for v in team_tracks if v["correct"]) / len(team_tracks)
+            if team_tracks else None
+        )
+    balanced = (
+        sum(r for r in recalls.values() if r is not None)
+        / sum(1 for r in recalls.values() if r is not None)
+    )
 
     report = {
         "confusion": {f"{t}->{a}": c for (t, a), c in sorted(conf.items())},
@@ -135,6 +135,9 @@ def main() -> None:
         "temporal_flips": flips,
         "tracks_never_flipping": stable,
         "tracks_with_club": len(track_clubs),
+        "median_frames_to_stable": (
+            statistics.median(frames_to_stable) if frames_to_stable else None
+        ),
     }
 
     # optional timing of the live assigner
