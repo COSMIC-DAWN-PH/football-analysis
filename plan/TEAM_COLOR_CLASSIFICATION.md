@@ -126,12 +126,30 @@
 - **性能** → 颜色提取仅在 track 前若干帧执行，达到票数后停止，总开销与原首帧提取相当；
 - **标注集本身有偏** → 只收录清晰无歧义样本；标注规则先定稿再标注，避免事后改口径。
 
-## 8. 推进记录
+## 8. 后续工作（双模型终验列出的非阻塞风险，需改动时另开验证门）
+
+- track 状态清理：`club_by_track`/`votes_by_track` 对消失的 track 永久保留，ID 复用时旧票会污染新球员最多一个窗口（60 帧）；
+- 门将路径：两队门将参考色相同（如 demo2 配置均为 (80,80,80)）时 `np.argmin` 恒返回 club1，存在系统性偏差；
+- `tracks.copy()` 是浅拷贝，嵌套 dict 被原地修改（与旧行为一致，但需文档化）；
+- 滑窗 30/30 平票时 `most_common(1)` 结果不稳定；
+- `get_player_club()` 仍走单点最近质心，与 `assign_clubs()` 的帧级聚类策略不一致（外部调用者需知悉）；
+- 绿色掩码阈值硬编码（36-86），极端光照/非绿色场地可能失效。
+
+## 8. 后续工作（双模型终验列出的非阻塞风险，需改动时另开验证门）
+
+- track 状态清理：`club_by_track`/`votes_by_track` 对消失的 track 永久保留，ID 复用时旧票会污染新球员最多一个窗口（60 帧）；
+- 门将路径：两队门将参考色相同（如 demo2 配置均为 (80,80,80)）时 `np.argmin` 恒返回 club1，存在系统性偏差；
+- `tracks.copy()` 是浅拷贝，嵌套 dict 被原地修改（与旧行为一致，但需文档化）；
+- 滑窗 30/30 平票时 `most_common(1)` 结果不稳定；
+- `get_player_club()` 仍走单点最近质心，与 `assign_clubs()` 的帧级聚类策略不一致（外部调用者需知悉）；
+- 绿色掩码阈值硬编码（36-86），极端光照/非绿色场地可能失效。
+
+## 9. 推进记录
 
 | Phase | 实现模型 | 验证模型 | 基线指标 | 完成后指标 | 裁决 | 提交 |
 |-------|----------|----------|----------|------------|------|------|
 | 0 | opencode-go/deepseek-v4-pro | 人工核对标注 | — | 验证集定稿：10 track / 34 crop；基线 balanced_acc=0.667（Maroon 召回 0.5、Navy 召回 0.833），Maroon→Navy 2 例、Navy→Maroon 1 例；覆盖率 1.0；assign_clubs 首帧全量 ~930ms/帧 | 通过 | b80043d |
 | 1 | opencode-go/deepseek-v4-pro | kimi-k2.7-code | balanced_acc=0.667 | balanced_acc=1.0（10/10），双向误判清零；覆盖率 0.995（-0.5pp）；temporal_flips=0；pytest 61 全绿；assign_clubs ~675ms/帧→~32ms/帧 | 通过 | 229067c |
-| 2 | opencode-go/deepseek-v4-pro | gpt-5.6-luna | Phase 1 后指标 | 验证集 balanced_acc=1.0 无回归；全 126 track 仅 p144 一处变化（Maroon→Navy，hue=133 独立复核确认 Navy 正确）；聚类路径帧0触发（11 人两组 hue ~107/~167，分离 60°）；pytest 61 全绿；replay 105ms/帧 | 待验证 | 待提交 |
+| 2 | opencode-go/deepseek-v4-pro | gpt-5.6-luna | Phase 1 后指标 | 验证集 balanced_acc=1.0 无回归；全 126 track 仅 p144 一处变化（Maroon→Navy，hue=133 独立复核确认 Navy 正确）；聚类路径帧0触发（11 人两组 hue ~107/~167，分离 60°）；pytest 61 全绿；replay 105ms/帧 | 通过 | e8fc22d |
 | 3 | opencode-go/deepseek-v4-pro | kimi-k2.7-code | Phase 2 后指标 | 验证集 balanced_acc=1.0；滑动窗口投票（60帧窗口）修正 3 个 track（p30/p143/p175，hue-truth 独立核验均正确）；发现并修复 ID 切换问题（p155 锁票版会锁错队，滑窗版吸收漂移）；sklearn KMeans 换手写圆形 2-means：kimi 独立实测纯 assign_clubs 0.75ms/帧；temporal_flips=11（含 ID 切换 track 的诚实翻转）；pytest 61 全绿 | 通过 | 88009bb |
-| 4 | opencode-go/deepseek-v4-pro | kimi-k2.7-code + gpt-5.6-luna 交叉 | — | 合成测试 tests/test_club_assignment.py 6 项通过（提取/聚类/单队退化/滑窗 ID 切换/环绕/低置信度）；全量 pytest 67 通过；全期指标：balanced_acc 0.667→1.0→1.0→1.0，双向误判 3→0，覆盖率 1.0→0.995（-0.5pp），assign_clubs 稳态 0.75ms/帧（kimi 实测） | 待交叉评审 | 待提交 |
+| 4 | opencode-go/deepseek-v4-pro | kimi-k2.7-code + gpt-5.6-luna 交叉 | — | 合成测试 tests/test_club_assignment.py 6 项通过（提取/聚类/单队退化/滑窗 ID 切换/环绕/低置信度）；全量 pytest 67 通过；全期指标：balanced_acc 0.667→1.0→1.0→1.0，双向误判 3→0，覆盖率 1.0→0.995（-0.5pp），assign_clubs 稳态 0.75ms/帧（kimi 实测） | kimi：通过（附文档补齐条件）；gpt：首轮因 Phase 2 记录缺失判不通过，补齐后复确认 | 20680e1 |
