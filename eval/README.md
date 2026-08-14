@@ -15,3 +15,13 @@
 
 - 10 个 track、34 张 crop。
 - 现有 pipeline 在该集上：balanced accuracy 0.667（Maroon 召回 0.5、Navy 召回 0.833）；Maroon→Navy 2 例、Navy→Maroon 1 例。
+
+# 裁判识别验证集（referee_crops/）
+
+## 标注规则
+
+- 来源：demo2-30s-test（900 帧）与 raw1/raw2 全量 tracks（`output_videos/<src>/raw/object_tracks.jsonl`），由 `tools/extract_referee_candidates.py` 按 track 聚合裁剪（每 track 最清晰的 ≤3 帧、帧间距 ≥15）。
+- 目录结构：`eval/referee_crops/{demo2,raw1,raw2}/candidates.jsonl` 为候选清单；`.../demo2/verdict/candidates.jsonl` 为新 assigner 改判案例（flag_player = 我判成裁判的球员、restore_referee = 我恢复队色的 referee 类），**人工重点核对这两类**。
+- `manual_label` 取值：`referee`（裁判）/ `maroon`（栗色红队）/ `navy`（藏青蓝队）；看不清或有歧义保持 `null`（不进评估）。
+- 清单已用规则预填 auto 结论，**你只需纠错**：把预填错误的字段改掉即可。
+- 评估脚本：`tools/eval_referee.py`（主口径 = referee 精确率/召回率 + 球队色保持率）；回归门槛 = 上节 34-crop 验证集 balanced acc 保持 1.0。

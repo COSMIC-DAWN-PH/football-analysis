@@ -30,3 +30,5 @@ output_videos/*
 # Generated learning/export artifacts
 lessons/
 training-data/
+
+logs/
