@@ -122,7 +122,19 @@
 - 结论：**颜色后处理边界案例**——门将（YOLO 漏检 + 特殊球衣色）无法靠颜色区分，属 Level B（YOLO 微调：提高 goalkeeper 类召回）。可选缓解：用户传入真实门将参考色（--club1-goalkeeper 用实际色而非占位灰），把"距门将参考色近"排除出 referee 判定。
 - 指标影响：p210 3 张标 navy 后，referee precision 1.0 -> 0.961（crop）/ 0.941（track）；recall 不变。
 
+### Luna 首轮裁决与修复（2026-08-15）
+- luna（gpt-5.6-luna，openchamber 会话）首轮裁决：**不通过**。阻断项：referee_assign_dist=75 低于 maroon 实测最大距离 83（存在 75-83 区间球员被误判为裁判的风险，评估集未覆盖该边界）；次要项：get_player_club() 仍走无拒绝出口的 predict()。
+- 修复（提交 820ec31）：① 阈值 75→85（落在 maroon 最大 83 与黄衣裁判最小 88 的安全区间）；② get_player_club 改用 predict_referee；③ 新增边界合成测试 3 项（pytest 75 全绿）。
+- 修复后指标：p210（navy 门将，用户标注）0 帧 referee 旗标（修复前 72/91），referee precision 恢复 1.0（crop/track），recall 0.907/0.941 不变，club preservation 0.9875/0.975，老验证集 balanced acc 1.0。残余误差仅剩 r74 混合 ID track 滞后 4 张与 p124 无数据帧 1 张（Level B 范围）。
+
+### p210 标签语义修正（2026-08-15，用户二次确认）
+- p210 不是藏青球员：他是 **navy 队（方）的门将**，穿红紫门将服（hue 120-160）。标注词汇因此扩展：`navy_gk` / `maroon_gk` = 某队门将（按球队归属判定，不按球衣色判定）。
+- `tools/eval_referee.py` 支持 _gk 标签：预期 club = 所属队名（navy_gk → navy），计入 club preservation；referee 指标里按"非裁判"处理。
+- p210 三张 verdict 图已改标 `navy_gk`；评估：navy_gk->navy 3/3 正确，指标不变（precision 1.0 / recall 0.907-0.941 / preservation 0.9875-0.975）。
+
 ## 12. 推进记录
+
+
 
 
 | Phase | 实现模型 | 验证模型 | 基线指标 | 完成后指标 | 裁决 | 提交 |

@@ -2,7 +2,10 @@
 
 The labels come from the candidate extraction manifest (tools/
 extract_referee_candidates.py) whose `manual_label` field was filled by a
-human with one of: referee / maroon / navy (null = ambiguous, skipped).
+human with one of: referee / maroon / navy / maroon_gk / navy_gk
+(null = ambiguous, skipped). The `_gk` labels mark a goalkeeper of that team
+whose jersey is not the field-player color; they are judged by team
+membership (expected club = the team's club name).
 
 Pipeline decisions are read from a tracks JSONL that was replayed with the
 current ClubAssigner (tools/replay_assign.py):
@@ -31,7 +34,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-CLUB_LABELS = ("maroon", "navy")
+CLUB_LABELS = ("maroon", "navy", "maroon_gk", "navy_gk")
+
+
+def _normalize_truth(label: str) -> str:
+    """Map a goalkeeper label to its team: navy_gk -> navy, maroon_gk -> maroon."""
+    return label[:-3] if label.endswith("_gk") else label
 
 
 def _pipeline_decision(track: dict, track_type: str):
@@ -54,7 +62,7 @@ def main() -> None:
         with open(path, encoding="utf-8") as f:
             for line in f:
                 meta = json.loads(line)
-                if meta.get("manual_label") in ("referee", "maroon", "navy"):
+                if meta.get("manual_label") in ("referee", "maroon", "navy", "maroon_gk", "navy_gk"):
                     labels.append(meta)
     if not labels:
         raise SystemExit("no labeled entries found; fill manual_label first")
@@ -92,7 +100,7 @@ def main() -> None:
         label_per_track[key] = truth
         conf[(truth, decision)] += 1
         crop_total += 1
-        crop_correct += int(decision == truth)
+        crop_correct += int(decision == _normalize_truth(truth))
 
     # Track-level majority decision
     track_conf = collections.Counter()
@@ -103,7 +111,7 @@ def main() -> None:
         majority = collections.Counter(decisions).most_common(1)[0][0]
         track_conf[(truth, majority)] += 1
         track_total += 1
-        track_correct += int(majority == truth)
+        track_correct += int(majority == _normalize_truth(truth))
 
     # Referee detection metrics: truth=referee vs truth=club (maroon/navy)
     def referee_metrics(confusion):
@@ -115,17 +123,18 @@ def main() -> None:
         precision = tp / (tp + fp) if tp + fp else None
         return {"tp": tp, "fn": fn, "fp": fp, "tn": tn, "recall": recall, "precision": precision}
 
-    # Club preservation on club-labeled crops: decision == truth
+    # Club preservation on club-labeled crops: decision == team (goalkeeper
+    # labels map to their team: navy_gk -> navy)
     club_crops = [(t, d) for (t, d) in conf if t in CLUB_LABELS]
-    club_ok = sum(conf[k] for k in club_crops if k[0] == k[1])
+    club_ok = sum(conf[k] for k in club_crops if k[1] == _normalize_truth(k[0]))
     club_n = sum(conf[k] for k in club_crops)
     club_track_crops = [(t, d) for (t, d) in track_conf if t in CLUB_LABELS]
-    club_track_ok = sum(track_conf[k] for k in club_track_crops if k[0] == k[1])
+    club_track_ok = sum(track_conf[k] for k in club_track_crops if k[1] == _normalize_truth(k[0]))
     club_track_n = sum(track_conf[k] for k in club_track_crops)
 
     # Coverage: labeled club crops with any club decision
     club_assigned = sum(
-        n for (t, d), n in conf.items() if t in CLUB_LABELS and d in CLUB_LABELS
+        n for (t, d), n in conf.items() if t in CLUB_LABELS and d in ("maroon", "navy")
     )
 
     report = {
