@@ -1,9 +1,10 @@
 from .club import Club
 
 import os
+from sklearn.cluster import KMeans
 import numpy as np
 import cv2
-from typing import Tuple, Dict, Any, Optional
+from typing import Tuple, Dict, Any, Optional, List
 
 class ClubAssigner:
     def __init__(self, club1: Club, club2: Club, images_to_save: int = 0, images_save_path: Optional[str] = None) -> None:
@@ -28,7 +29,12 @@ class ClubAssigner:
             club2.name: club2.goalkeeper_jersey_color
         }
         self.min_jersey_pixels = 30
+        self.frame_cluster_min_samples = 4
+        self.cluster_separation_min_deg = 25.0
         self.club_by_track: Dict[Tuple[str, int], str] = {}
+        self.player_ref_hues: Dict[str, float] = {
+            name: self._rgb_to_hue(color) for name, color in self.club_colors.items()
+        }
 
         # Saving images for analysis
         self.images_to_save = images_to_save
@@ -42,6 +48,70 @@ class ClubAssigner:
                 os.makedirs(self.output_dir)
         
             self.saved_images = len([name for name in os.listdir(self.output_dir) if name.startswith('player')])
+
+    @staticmethod
+    def _rgb_to_hue(color: Tuple[int, int, int]) -> float:
+        """Convert an RGB color to OpenCV hue (0-180)."""
+        bgr = np.uint8([[[color[2], color[1], color[0]]]])
+        return float(cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)[0, 0, 0])
+
+    @staticmethod
+    def _hue_dist(a: float, b: float) -> float:
+        """Circular hue distance in degrees (OpenCV hue range 0-180)."""
+        d = abs(a - b) % 180.0
+        return min(d, 180.0 - d)
+
+    @staticmethod
+    def _stats_to_rgb(hue: float, sat: float, val: float) -> Tuple[int, int, int]:
+        """Convert median HSV statistics back to an RGB color."""
+        bgr = cv2.cvtColor(np.uint8([[[hue, sat, val]]]), cv2.COLOR_HSV2BGR)[0, 0]
+        return (int(bgr[2]), int(bgr[1]), int(bgr[0]))
+
+    def _frame_cluster_map(
+        self,
+        items: List[Tuple[Tuple[str, int], float, float, float, int]],
+    ) -> Dict[Tuple[str, int], str]:
+        """
+        Cluster all players of the current frame into two hue groups and map
+        each group to a club via the configured reference jersey colors.
+
+        Args:
+            items: List of (cache_key, median_hue, median_sat, median_val, n_pixels).
+
+        Returns:
+            Dict mapping cache_key to club name.
+        """
+        hues = np.array([it[1] for it in items], dtype=float)
+        weights = np.array([it[4] for it in items], dtype=float)
+        ang = np.deg2rad(hues * 2.0)
+        x = np.stack([np.cos(ang), np.sin(ang)], axis=1)
+        kmeans = KMeans(n_clusters=2, init='k-means++', n_init=10, random_state=42)
+        kmeans.fit(x, sample_weight=weights)
+
+        centers = kmeans.cluster_centers_
+        center_hues = (np.rad2deg(np.arctan2(centers[:, 1], centers[:, 0])) % 360.0) / 2.0
+        refs = list(self.player_ref_hues.items())
+
+        result: Dict[Tuple[str, int], str] = {}
+        separation = self._hue_dist(center_hues[0], center_hues[1])
+        if separation >= self.cluster_separation_min_deg:
+            nearest = [
+                min(range(2), key=lambda r: self._hue_dist(center_hues[i], refs[r][1]))
+                for i in range(2)
+            ]
+            if nearest[0] != nearest[1]:
+                mapping = {i: refs[nearest[i]][0] for i in range(2)}
+                for it, label in zip(items, kmeans.labels_):
+                    result[it[0]] = mapping[int(label)]
+                return result
+
+        # Clusters not separable (single team in frame) or mapping ambiguous:
+        # fall back to per-player nearest-reference classification.
+        for it in items:
+            color = self._stats_to_rgb(it[1], it[2], it[3])
+            pred = self.model.predict(color, is_goalkeeper=False)
+            result[it[0]] = list(self.club_colors.keys())[pred]
+        return result
 
     def apply_mask(self, image: np.ndarray) -> np.ndarray:
         """
@@ -197,23 +267,52 @@ class ClubAssigner:
         """
         tracks = tracks.copy()
 
+        pending: List[Tuple[Tuple[str, int], str, Tuple[float, float, float, int]]] = []
         for track_type in ['goalkeeper', 'player']:
             for player_id, track in tracks[track_type].items():
                 cache_key = (track_type, player_id)
                 club = self.club_by_track.get(cache_key)
-                if club is None:
-                    bbox = track['bbox']
-                    is_goalkeeper = (track_type == 'goalkeeper')
-                    club, _ = self.get_player_club(frame, bbox, player_id, is_goalkeeper)
-                    if club is None:
-                        # Not enough reliable jersey pixels this frame; keep
-                        # the track unassigned and retry on a later frame.
-                        continue
-                    self.club_by_track[cache_key] = club
-                
-                tracks[track_type][player_id]['club'] = club
-                tracks[track_type][player_id]['club_color'] = self.club_colors[club]
-        
+                if club is not None:
+                    tracks[track_type][player_id]['club'] = club
+                    tracks[track_type][player_id]['club_color'] = self.club_colors[club]
+                    continue
+                stats = self.extract_jersey_stats(frame, track['bbox'])
+                if stats is None or stats[3] < self.min_jersey_pixels:
+                    # Not enough reliable jersey pixels this frame; keep
+                    # the track unassigned and retry on a later frame.
+                    continue
+                pending.append((cache_key, track_type, stats))
+
+        if not pending:
+            return tracks
+
+        player_items = [p for p in pending if p[1] == 'player']
+        goalkeeper_items = [p for p in pending if p[1] == 'goalkeeper']
+
+        decided: Dict[Tuple[str, int], str] = {}
+        if len(player_items) >= self.frame_cluster_min_samples:
+            frame_items = [
+                (key, stats[0], stats[1], stats[2], stats[3])
+                for key, _, stats in player_items
+            ]
+            decided.update(self._frame_cluster_map(frame_items))
+        else:
+            for key, _, stats in player_items:
+                color = self._stats_to_rgb(stats[0], stats[1], stats[2])
+                pred = self.model.predict(color, is_goalkeeper=False)
+                decided[key] = list(self.club_colors.keys())[pred]
+
+        for key, _, stats in goalkeeper_items:
+            color = self._stats_to_rgb(stats[0], stats[1], stats[2])
+            pred = self.model.predict(color, is_goalkeeper=True)
+            decided[key] = list(self.club_colors.keys())[pred]
+
+        for cache_key, club in decided.items():
+            self.club_by_track[cache_key] = club
+            track_type, player_id = cache_key
+            tracks[track_type][player_id]['club'] = club
+            tracks[track_type][player_id]['club_color'] = self.club_colors[club]
+
         return tracks
 
 class ClubAssignerModel:
@@ -227,24 +326,46 @@ class ClubAssignerModel:
         """
         self.player_centroids = np.array([club1.player_jersey_color, club2.player_jersey_color])
         self.goalkeeper_centroids = np.array([club1.goalkeeper_jersey_color, club2.goalkeeper_jersey_color])
+        self.player_hsv = np.array([self._rgb_to_hsv(c) for c in self.player_centroids])
+        self.goalkeeper_hsv = np.array([self._rgb_to_hsv(c) for c in self.goalkeeper_centroids])
+
+    @staticmethod
+    def _rgb_to_hsv(color: Tuple[int, int, int]) -> Tuple[float, float, float]:
+        bgr = np.uint8([[[color[2], color[1], color[0]]]])
+        h, s, v = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)[0, 0]
+        return (float(h), float(s), float(v))
+
+    @staticmethod
+    def _hsv_distance(
+        a: Tuple[float, float, float],
+        b: Tuple[float, float, float],
+    ) -> float:
+        """
+        Weighted HSV distance: circular hue difference dominates when both
+        colors are saturated; saturation/value differences add robustness
+        for near-gray colors where hue is meaningless.
+        """
+        hue_weight = 2.0 if (a[1] >= 30.0 and b[1] >= 30.0) else 0.0
+        dh = ClubAssigner._hue_dist(a[0], b[0])
+        return hue_weight * dh + 0.25 * abs(a[1] - b[1]) + 0.25 * abs(a[2] - b[2])
 
     def predict(self, extracted_color: Tuple[int, int, int], is_goalkeeper: bool = False) -> int:
         """
         Predict the club for a given jersey color based on the centroids.
 
         Args:
-            extracted_color (Tuple[int, int, int]): The extracted jersey color in BGR format.
+            extracted_color (Tuple[int, int, int]): The extracted jersey color in RGB format.
             is_goalkeeper (bool): Flag to indicate if the color is for a goalkeeper.
 
         Returns:
             int: The index of the predicted club (0 or 1).
         """
         if is_goalkeeper:
-            centroids = self.goalkeeper_centroids
+            reference = self.goalkeeper_hsv
         else:
-            centroids = self.player_centroids
+            reference = self.player_hsv
 
-        # Calculate distances
-        distances = np.linalg.norm(extracted_color - centroids, axis=1)
+        hsv = self._rgb_to_hsv(extracted_color)
+        distances = np.array([self._hsv_distance(hsv, r) for r in reference])
         
-        return np.argmin(distances)
+        return int(np.argmin(distances))
