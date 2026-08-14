@@ -133,10 +133,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--club1-name", default="Club1")
     parser.add_argument("--club1-player", type=_rgb, default=(232, 247, 248), metavar="R,G,B")
-    parser.add_argument("--club1-goalkeeper", type=_rgb, default=(6, 25, 21), metavar="R,G,B")
+    parser.add_argument("--club1-goalkeeper", type=_rgb, default=(30, 30, 30), metavar="R,G,B")
     parser.add_argument("--club2-name", default="Club2")
     parser.add_argument("--club2-player", type=_rgb, default=(172, 251, 145), metavar="R,G,B")
-    parser.add_argument("--club2-goalkeeper", type=_rgb, default=(239, 156, 132), metavar="R,G,B")
+    parser.add_argument("--club2-goalkeeper", type=_rgb, default=(48, 37, 68), metavar="R,G,B")
     parser.add_argument(
         "--referee-color",
         type=_rgb,

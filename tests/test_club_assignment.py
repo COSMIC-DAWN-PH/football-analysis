@@ -17,6 +17,8 @@ from club_assignment import Club, ClubAssigner, ClubAssignerModel  # noqa: E402
 MAROON_RGB = (120, 37, 66)
 NAVY_RGB = (31, 72, 127)
 YELLOW_RGB = (255, 220, 30)
+MAROON_GK_RGB = (30, 30, 30)      # black goalkeeper (maroon side)
+NAVY_GK_RGB = (48, 37, 68)        # dark purple goalkeeper (navy side)
 
 
 def make_frame(players, size=(1280, 720)):
@@ -151,8 +153,8 @@ def test_low_confidence_crop_yields_none():
 
 
 def _make_assigner():
-    return ClubAssigner(Club("Maroon", MAROON_RGB, (80, 80, 80)),
-                        Club("Navy", NAVY_RGB, (80, 80, 80)))
+    return ClubAssigner(Club("Maroon", MAROON_RGB, MAROON_GK_RGB),
+                        Club("Navy", NAVY_RGB, NAVY_GK_RGB))
 
 
 def test_yellow_player_flagged_as_referee():
@@ -254,23 +256,29 @@ def test_referee_assign_dist_boundary_zone():
 
     Measured on demo2: maroon players reach min-distance 83, yellow referees
     start at 88; the threshold (85) must reject the former side and accept the
-    latter.
+    latter. Scans a hue/sat/val grid in the yellow region (where distance to
+    the maroon reference crosses the boundary) while the goalkeeper
+    references stay far away.
     """
     assigner = _make_assigner()
     model = assigner.model
     club_seen = referee_seen = False
-    ref0 = model.player_hsv[0]  # maroon reference
-    for hue in range(135, 172):
-        rgb = _hsv_color(float(hue), 80.0, 60.0)
-        hsv = model._rgb_to_hsv(rgb)
-        dmin = min(model._hsv_distance(hsv, r) for r in model.player_hsv)
-        pred = model.predict_referee(rgb, is_goalkeeper=False)
-        if 78.0 <= dmin <= 84.0:
-            assert pred is not None, f"dmin {dmin:.0f} must stay a club color"
-            club_seen = True
-        if 86.0 <= dmin <= 95.0:
-            assert pred is None, f"dmin {dmin:.0f} must be a referee color"
-            referee_seen = True
+    for hue in (24.0, 28.0, 32.0):
+        for sat in (150.0, 160.0, 172.0):
+            for val in (140.0, 150.0, 160.0, 170.0):
+                rgb = _hsv_color(hue, sat, val)
+                hsv = model._rgb_to_hsv(rgb)
+                dmin = min(model._hsv_distance(hsv, r) for r in model.player_hsv)
+                d_gk = min(model._hsv_distance(hsv, r) for r in model.goalkeeper_hsv)
+                if d_gk <= model.gk_match_dist:
+                    continue  # goalkeeper references interfere; skip
+                pred = model.predict_referee(rgb, is_goalkeeper=False)
+                if 78.0 <= dmin <= 84.0:
+                    assert pred is not None, f"dmin {dmin:.0f} must stay a club color"
+                    club_seen = True
+                if 86.0 <= dmin <= 95.0:
+                    assert pred is None, f"dmin {dmin:.0f} must be a referee color"
+                    referee_seen = True
     assert club_seen, "no sample landed in the club boundary zone"
     assert referee_seen, "no sample landed in the referee boundary zone"
 
@@ -278,8 +286,8 @@ def test_referee_assign_dist_boundary_zone():
 def test_referee_color_reference_wins_when_closer():
     # Explicit three-reference configuration (demo2 measured referee jersey)
     model = ClubAssignerModel(
-        Club('Maroon', MAROON_RGB, (80, 80, 80)),
-        Club('Navy', NAVY_RGB, (80, 80, 80)),
+        Club("Maroon", MAROON_RGB, MAROON_GK_RGB),
+        Club("Navy", NAVY_RGB, NAVY_GK_RGB),
         referee_assign_dist=85.0,
         referee_color=(168, 156, 74),
     )
@@ -298,3 +306,61 @@ def test_get_player_club_rejects_referee_color():
     bbox = players[-1][0]
     club, pred = assigner.get_player_club(frame, bbox, 99)
     assert club is None and pred is None
+
+
+def test_purple_gk_player_assigned_navy_team():
+    """A player-class track in the navy goalkeeper jersey goes to navy, not referee."""
+    assigner = _make_assigner()
+    players = make_players([MAROON_RGB, NAVY_RGB])
+    players.append(((600, 300, 655, 420), NAVY_GK_RGB))
+    frame = make_frame(players)
+    tracks = {
+        "player": {i: {"bbox": list(bbox)} for i, (bbox, _rgb) in enumerate(players)},
+        "goalkeeper": {},
+        "referee": {},
+    }
+    out = None
+    for _ in range(35):
+        out = assigner.assign_clubs(frame, tracks)
+    gk_id = len(players) - 1
+    assert out["player"][gk_id].get("club") == "Navy"
+    assert not out["player"][gk_id].get("referee")
+
+
+def test_black_gk_player_assigned_maroon_team():
+    """A player-class track in the black maroon goalkeeper jersey goes to maroon."""
+    assigner = _make_assigner()
+    players = make_players([MAROON_RGB, NAVY_RGB])
+    players.append(((600, 300, 655, 420), MAROON_GK_RGB))
+    frame = make_frame(players)
+    # Overwrite the jersey band with a realistic constant dark jersey (the
+    # make_frame noise is too strong for near-black colors).
+    x1, y1, x2, y2 = players[-1][0]
+    frame[y1 + int((y2 - y1) * 0.3):y1 + int((y2 - y1) * 0.6), x1:x2] = (38, 35, 32)
+    tracks = {
+        "player": {i: {"bbox": list(bbox)} for i, (bbox, _rgb) in enumerate(players)},
+        "goalkeeper": {},
+        "referee": {},
+    }
+    out = None
+    for _ in range(35):
+        out = assigner.assign_clubs(frame, tracks)
+    gk_id = len(players) - 1
+    assert out["player"][gk_id].get("club") == "Maroon"
+    assert not out["player"][gk_id].get("referee")
+
+
+def test_yellow_referee_not_stolen_by_gk_references():
+    """Yellow referee must stay referee even with goalkeeper references present."""
+    assigner = _make_assigner()
+    model = assigner.model
+    assert model.predict_referee(YELLOW_RGB, is_goalkeeper=False) is None
+    assert model.predict_referee(NAVY_RGB, is_goalkeeper=False) == 1
+    assert model.predict_referee(MAROON_RGB, is_goalkeeper=False) == 0
+
+
+def test_gk_class_track_uses_gk_reference_colors():
+    assigner = _make_assigner()
+    model = assigner.model
+    assert model.predict_referee(MAROON_GK_RGB, is_goalkeeper=True) == 0
+    assert model.predict_referee(NAVY_GK_RGB, is_goalkeeper=True) == 1

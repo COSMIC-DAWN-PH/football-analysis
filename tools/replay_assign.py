@@ -37,10 +37,10 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--club1-name", default="Maroon")
     parser.add_argument("--club1-player", type=_rgb, default=(120, 37, 66))
-    parser.add_argument("--club1-goalkeeper", type=_rgb, default=(80, 80, 80))
+    parser.add_argument("--club1-goalkeeper", type=_rgb, default=(30, 30, 30))
     parser.add_argument("--club2-name", default="Navy")
     parser.add_argument("--club2-player", type=_rgb, default=(31, 72, 127))
-    parser.add_argument("--club2-goalkeeper", type=_rgb, default=(80, 80, 80))
+    parser.add_argument("--club2-goalkeeper", type=_rgb, default=(48, 37, 68))
     parser.add_argument("--referee-color", type=_rgb, default=None,
                         help="Referee jersey reference color R,G,B")
     args = parser.parse_args()
