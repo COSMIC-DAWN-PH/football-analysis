@@ -8,7 +8,7 @@ from typing import Tuple, Dict, Any, Optional, List
 
 class ClubAssigner:
     def __init__(self, club1: Club, club2: Club, images_to_save: int = 0, images_save_path: Optional[str] = None,
-                 referee_assign_dist: float = 75.0, referee_color: Optional[Tuple[int, int, int]] = None,
+                 referee_assign_dist: float = 85.0, referee_color: Optional[Tuple[int, int, int]] = None,
                  referee_match_dist: float = 75.0) -> None:
         """
         Initializes the ClubAssigner with club information and image saving parameters.
@@ -335,14 +335,17 @@ class ClubAssigner:
 
         Returns:
             Tuple[Optional[str], Optional[int]]: The club name and the predicted class
-            index, or (None, None) if the jersey color is not reliable in this frame.
+            index, or (None, None) if the jersey color is not reliable in this frame
+            or is a referee color.
         """
         color = self.get_jersey_color(frame, bbox, player_id, is_goalkeeper)
         if color is None:
             return None, None
 
-        pred = self.model.predict(color, is_goalkeeper)
-        
+        pred = self.model.predict_referee(color, is_goalkeeper)
+        if pred is None:
+            return None, None
+
         return list(self.club_colors.keys())[pred], pred
 
     def assign_clubs(self, frame: np.ndarray, tracks: Dict[str, Dict[int, Any]]) -> Dict[str, Dict[int, Any]]:
@@ -431,7 +434,7 @@ class ClubAssigner:
         return tracks
 
 class ClubAssignerModel:
-    def __init__(self, club1: Club, club2: Club, referee_assign_dist: float = 75.0,
+    def __init__(self, club1: Club, club2: Club, referee_assign_dist: float = 85.0,
                  referee_color: Optional[Tuple[int, int, int]] = None,
                  referee_match_dist: float = 75.0) -> None:
         """

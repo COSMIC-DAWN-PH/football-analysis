@@ -242,3 +242,51 @@ def test_referee_flag_recovers_after_jersey_change():
         out = assigner.assign_clubs(frame, tracks)
     assert out["player"][0].get("club") == "Navy"
     assert not out["player"][0].get("referee"), "referee flag must clear after jersey change"
+
+
+def _hsv_color(hue, sat, val):
+    bgr = cv2.cvtColor(np.uint8([[[hue, sat, val]]]), cv2.COLOR_HSV2BGR)[0, 0]
+    return (int(bgr[2]), int(bgr[1]), int(bgr[0]))
+
+
+def test_referee_assign_dist_boundary_zone():
+    """Samples in the calibrated gap (83-88) must land on the right side.
+
+    Measured on demo2: maroon players reach min-distance 83, yellow referees
+    start at 88; the threshold (85) must reject the former side and accept the
+    latter.
+    """
+    assigner = _make_assigner()
+    model = assigner.model
+    club_seen = referee_seen = False
+    ref0 = model.player_hsv[0]  # maroon reference
+    for hue in range(135, 172):
+        rgb = _hsv_color(float(hue), 80.0, 60.0)
+        hsv = model._rgb_to_hsv(rgb)
+        dmin = min(model._hsv_distance(hsv, r) for r in model.player_hsv)
+        pred = model.predict_referee(rgb, is_goalkeeper=False)
+        if 78.0 <= dmin <= 84.0:
+            assert pred is not None, f"dmin {dmin:.0f} must stay a club color"
+            club_seen = True
+        if 86.0 <= dmin <= 95.0:
+            assert pred is None, f"dmin {dmin:.0f} must be a referee color"
+            referee_seen = True
+    assert club_seen, "no sample landed in the club boundary zone"
+    assert referee_seen, "no sample landed in the referee boundary zone"
+
+
+def test_referee_color_reference_wins_when_closer():
+    assigner = _make_assigner()
+    model = assigner.model
+    # demo2 measured referee reference color: near-yellow jersey
+    assert model.predict_referee((168, 156, 74), is_goalkeeper=False) is None
+
+
+def test_get_player_club_rejects_referee_color():
+    assigner = _make_assigner()
+    players = make_players([MAROON_RGB, NAVY_RGB])
+    players.append(((600, 300, 655, 420), YELLOW_RGB))
+    frame = make_frame(players)
+    bbox = players[-1][0]
+    club, pred = assigner.get_player_club(frame, bbox, 99)
+    assert club is None and pred is None
