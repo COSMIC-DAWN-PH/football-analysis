@@ -17,8 +17,9 @@ class ObjectTracker(AbstractTracker):
         ball_conf: float = 0.05,
         imgsz: int = 1280,
         include_ball: bool = True,
+        device: str = "auto",
     ) -> None:
-        super().__init__(model_path, conf, task="detect")
+        super().__init__(model_path, conf, task="detect", device=device)
         self.ball_conf = ball_conf
         self.imgsz = self.inference_imgsz(imgsz)
         self.include_ball = include_ball
@@ -50,6 +51,7 @@ class ObjectTracker(AbstractTracker):
             conf=self.conf,
             imgsz=self.imgsz,
             verbose=False,
+            device=self.device,
         )
 
     def track(self, detection: Results) -> dict:

@@ -103,6 +103,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Raw JSONL directory; defaults to <run-dir>/raw",
     )
     parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help=(
+            "Inference device: 'auto' probes OpenVINO iGPU/NPU for exported "
+            "models ('intel:NPU', 'intel:GPU', 'intel:CPU' or a torch device "
+            "like 'cpu')"
+        ),
+    )
     parser.add_argument("--skip-seconds", type=int, default=0)
     parser.add_argument(
         "--estimate-speed",
@@ -175,11 +184,13 @@ def main(argv: list[str] | None = None) -> None:
         conf=0.25,
         ball_conf=0.05,
         include_ball=False,
+        device=args.device,
     )
     kp_tracker = KeypointsTracker(
         model_path=str(args.keypoints_model),
         conf=0.2,
         kp_conf=0.5,
+        device=args.device,
     )
 
     club1 = Club(args.club1_name, args.club1_player, args.club1_goalkeeper)
@@ -192,7 +203,7 @@ def main(argv: list[str] | None = None) -> None:
     except ValueError as exc:
         parser.error(str(exc))
 
-    ball_detector = BallDetector(str(args.ball_model))
+    ball_detector = BallDetector(str(args.ball_model), device=args.device)
     ball_tracker = BallTracker(pitch_geometry)
 
     processor = FootballVideoProcessor(
