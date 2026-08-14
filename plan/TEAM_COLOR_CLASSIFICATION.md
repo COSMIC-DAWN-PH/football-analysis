@@ -131,7 +131,7 @@
 | Phase | 实现模型 | 验证模型 | 基线指标 | 完成后指标 | 裁决 | 提交 |
 |-------|----------|----------|----------|------------|------|------|
 | 0 | opencode-go/deepseek-v4-pro | 人工核对标注 | — | 验证集定稿：10 track / 34 crop；基线 balanced_acc=0.667（Maroon 召回 0.5、Navy 召回 0.833），Maroon→Navy 2 例、Navy→Maroon 1 例；覆盖率 1.0；assign_clubs 首帧全量 ~930ms/帧 | 通过 | b80043d |
-| 1 | opencode-go/deepseek-v4-pro | kimi-k2.7-code | balanced_acc=0.667 | balanced_acc=1.0（10/10），双向误判清零；覆盖率 0.995（-0.5pp）；temporal_flips=0；pytest 61 全绿；replay 93ms/帧 | 待验证 | 待提交 |
+| 1 | opencode-go/deepseek-v4-pro | kimi-k2.7-code | balanced_acc=0.667 | balanced_acc=1.0（10/10），双向误判清零；覆盖率 0.995（-0.5pp）；temporal_flips=0；pytest 61 全绿；assign_clubs ~675ms/帧→~32ms/帧 | 通过 | 229067c |
 | 2 | | | | | | |
 | 3 | | | | | | |
 | 4 | — | kimi-k2.7-code + gpt-5.6-luna 交叉 | | | | |
