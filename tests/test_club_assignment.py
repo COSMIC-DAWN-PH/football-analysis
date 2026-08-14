@@ -12,7 +12,7 @@ import cv2
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from club_assignment import Club, ClubAssigner  # noqa: E402
+from club_assignment import Club, ClubAssigner, ClubAssignerModel  # noqa: E402
 
 MAROON_RGB = (120, 37, 66)
 NAVY_RGB = (31, 72, 127)
@@ -276,10 +276,18 @@ def test_referee_assign_dist_boundary_zone():
 
 
 def test_referee_color_reference_wins_when_closer():
-    assigner = _make_assigner()
-    model = assigner.model
-    # demo2 measured referee reference color: near-yellow jersey
+    # Explicit three-reference configuration (demo2 measured referee jersey)
+    model = ClubAssignerModel(
+        Club('Maroon', MAROON_RGB, (80, 80, 80)),
+        Club('Navy', NAVY_RGB, (80, 80, 80)),
+        referee_assign_dist=85.0,
+        referee_color=(168, 156, 74),
+    )
     assert model.predict_referee((168, 156, 74), is_goalkeeper=False) is None
+    assert model.predict_referee((170, 158, 70), is_goalkeeper=False) is None
+    assert model.predict_referee(MAROON_RGB, is_goalkeeper=False) == 0
+    assert model.predict_referee(NAVY_RGB, is_goalkeeper=False) == 1
+    assert model.predict_referee(YELLOW_RGB, is_goalkeeper=False) is None
 
 
 def test_get_player_club_rejects_referee_color():
