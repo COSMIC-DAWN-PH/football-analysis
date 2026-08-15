@@ -12,6 +12,7 @@ import yaml
 from ultralytics import YOLO
 
 from position_mappers import CalibrationResult, PitchGeometry
+from tracking.abstract_tracker import resolve_inference_device
 
 
 @dataclass(frozen=True)
@@ -91,11 +92,15 @@ class BallDetector:
         global_imgsz: int = 1920,
         tile_imgsz: int = 1280,
         overlap: float = 0.20,
+        device: str = "auto",
     ) -> None:
         path = Path(model_path)
+        self.device = resolve_inference_device(
+            model_path, requested=device, priority=("GPU", "NPU", "CPU")
+        )
         self.model = YOLO(model_path, task="detect")
         if path.is_file():
-            self.model.to(torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+            self.model.to(torch.device(self.device))
         fixed_size = self._fixed_export_size(path)
         self.global_imgsz = fixed_size or global_imgsz
         self.tile_imgsz = fixed_size or tile_imgsz
@@ -137,6 +142,7 @@ class BallDetector:
             conf=self.confidence,
             imgsz=image_size,
             verbose=False,
+            device=self.device,
         )[0]
         if result.boxes is None or len(result.boxes) == 0:
             return []

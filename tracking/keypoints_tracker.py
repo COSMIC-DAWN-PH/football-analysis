@@ -19,8 +19,9 @@ class KeypointsTracker(AbstractTracker):
         kp_conf: float = 0.5,
         imgsz: int = 1280,
         detection_interval: int = 5,
+        device: str = "auto",
     ) -> None:
-        super().__init__(model_path, conf, task="pose")
+        super().__init__(model_path, conf, task="pose", device=device)
         self.kp_conf = kp_conf
         self.imgsz = self.inference_imgsz(imgsz)
         self.detection_interval = max(1, detection_interval)
@@ -49,6 +50,7 @@ class KeypointsTracker(AbstractTracker):
                 conf=self.conf,
                 imgsz=self.imgsz,
                 verbose=False,
+                device=self.device,
             )
             for index, detection in zip(selected_indexes, detections):
                 output[index] = detection
@@ -61,7 +63,7 @@ class KeypointsTracker(AbstractTracker):
     def detect_now(self, frame: np.ndarray) -> dict[int, tuple[float, float]]:
         """Run an immediate detection when optical flow/calibration has failed."""
         detection = self.model.predict(
-            [frame], conf=self.conf, imgsz=self.imgsz, verbose=False
+            [frame], conf=self.conf, imgsz=self.imgsz, verbose=False, device=self.device
         )[0]
         self._force_next = False
         return self._map_detection(detection)
