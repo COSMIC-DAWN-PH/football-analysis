@@ -1,5 +1,7 @@
 # PLAN：球队颜色识别优化（Robust Team Color Classification）
 
+> **状态：已完成并验收关闭（2026-08-15）。后继工作见 plan/YOLO_FINETUNE.md。**
+
 分支：`codex/team-color-classification`
 基线：`codex/robust-pitch-registration` @ f0529ec
 

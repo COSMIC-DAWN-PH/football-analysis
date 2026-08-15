@@ -1,5 +1,7 @@
 # PLAN：裁判识别优化（Referee Detection & Club Assignment）
 
+> **状态：已完成并验收关闭（2026-08-15）。后继工作见 plan/YOLO_FINETUNE.md。**
+
 分支：`codex/team-color-classification`
 数据源：`demo2.mp4`（2.5min）、`C:\Personal Profile\Profile\Video\raw1.mp4` / `raw2.mp4`（各 30min，同场比赛上下半场）
 硬件：Core Ultra 5 125H（Arc iGPU 145ms/帧、AI Boost NPU 156ms/帧 @ object-detection 1280 fp16；无 CUDA）
