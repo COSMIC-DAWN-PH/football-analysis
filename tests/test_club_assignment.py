@@ -364,3 +364,26 @@ def test_gk_class_track_uses_gk_reference_colors():
     model = assigner.model
     assert model.predict_referee(MAROON_GK_RGB, is_goalkeeper=True) == 0
     assert model.predict_referee(NAVY_GK_RGB, is_goalkeeper=True) == 1
+
+
+def test_bright_red_jersey_not_stolen_by_referee_color():
+    """A bright red jersey must not be stolen by the yellow referee reference.
+
+    Found on raw1: a red-jersey person (hue ~6, bright) was closer to the
+    yellow referee reference than to the dark maroon reference in weighted
+    distance; the hue-based referee check must reject it.
+    """
+    model = ClubAssignerModel(
+        Club("Maroon", MAROON_RGB, MAROON_GK_RGB),
+        Club("Navy", NAVY_RGB, NAVY_GK_RGB),
+        referee_assign_dist=85.0,
+        referee_color=(168, 156, 74),
+    )
+    red = _hsv_color(6.0, 100.0, 160.0)
+    assert model.predict_referee(red, is_goalkeeper=False) is not None, "red jersey must not be referee"
+    yellow = _hsv_color(26.0, 146.0, 169.0)
+    assert model.predict_referee(yellow, is_goalkeeper=False) is None
+    orange = _hsv_color(15.0, 150.0, 160.0)
+    assert model.predict_referee(orange, is_goalkeeper=False) is None, "orange stays referee-like"
+    navy = _hsv_color(107.0, 193.0, 127.0)
+    assert model.predict_referee(navy, is_goalkeeper=False) == 1

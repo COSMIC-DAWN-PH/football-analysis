@@ -9,7 +9,7 @@ from typing import Tuple, Dict, Any, Optional, List
 class ClubAssigner:
     def __init__(self, club1: Club, club2: Club, images_to_save: int = 0, images_save_path: Optional[str] = None,
                  referee_assign_dist: float = 85.0, referee_color: Optional[Tuple[int, int, int]] = None,
-                 referee_match_dist: float = 75.0) -> None:
+                 referee_hue_tol_deg: float = 15.0) -> None:
         """
         Initializes the ClubAssigner with club information and image saving parameters.
 
@@ -22,15 +22,15 @@ class ClubAssigner:
                 reference for a sample to be assigned to that club; farther
                 samples are referee candidates.
             referee_color (Optional[Tuple[int, int, int]]): RGB reference color
-                of the referee jersey. When given, a sample whose weighted HSV
-                distance to this reference is smaller than its distance to both
-                club references (and within `referee_match_dist`) is a referee.
-            referee_match_dist (float): Maximum weighted HSV distance to the
-                referee reference for a referee assignment.
+                of the referee jersey. When given, a sample whose hue is within
+                `referee_hue_tol_deg` of the referee reference hue (and closer
+                than both club hues) is a referee.
+            referee_hue_tol_deg (float): Maximum circular hue distance to the
+                referee reference hue for a referee assignment.
         """
         self.club1 = club1
         self.club2 = club2
-        self.model = ClubAssignerModel(self.club1, self.club2, referee_assign_dist, referee_color, referee_match_dist)
+        self.model = ClubAssignerModel(self.club1, self.club2, referee_assign_dist, referee_color, referee_hue_tol_deg)
         self.club_colors: Dict[str, Any] = {
             club1.name: club1.player_jersey_color,
             club2.name: club2.player_jersey_color
@@ -45,7 +45,7 @@ class ClubAssigner:
         self.vote_window = 60
         self.referee_assign_dist = float(referee_assign_dist)
         self.referee_color = referee_color
-        self.referee_match_dist = float(referee_match_dist)
+        self.referee_hue_tol_deg = float(referee_hue_tol_deg)
         self.club_by_track: Dict[Tuple[str, int], str] = {}
         self.votes_by_track: Dict[Tuple[str, int], deque] = {}
         self.player_ref_hues: Dict[str, float] = {
@@ -337,15 +337,13 @@ class ClubAssigner:
         club_best = int(np.argmin(d_club))
         names = list(self.club_colors.keys())
 
-        if self.model.referee_hsv is not None:
-            d_ref = float(self.model._hsv_distance(hsv, self.model.referee_hsv))
-            if (
-                d_ref <= self.model.referee_match_dist
-                and d_ref < min(d_gk[gk_best], d_club[club_best])
-            ):
-                return "referee"
+        if self.model._is_referee_color(hsv, min_sat=30.0, min_val=25.0):
+            return "referee"
 
-        if d_gk[gk_best] <= self.model.gk_match_dist and d_gk[gk_best] < d_club[club_best]:
+        if (
+            d_gk[gk_best] <= self.model._gk_threshold(self.model.goalkeeper_hsv[gk_best])
+            and d_gk[gk_best] < d_club[club_best]
+        ):
             return names[gk_best]
         if d_club[club_best] <= 45.0:
             return names[club_best]
@@ -535,8 +533,9 @@ class ClubAssigner:
 class ClubAssignerModel:
     def __init__(self, club1: Club, club2: Club, referee_assign_dist: float = 85.0,
                  referee_color: Optional[Tuple[int, int, int]] = None,
-                 referee_match_dist: float = 75.0,
-                 gk_match_dist: float = 60.0) -> None:
+                 referee_hue_tol_deg: float = 15.0,
+                 gk_match_dist: float = 60.0,
+                 gk_dark_match_dist: float = 40.0) -> None:
         """
         Initializes the ClubAssignerModel with jersey colors for the clubs.
 
@@ -547,21 +546,50 @@ class ClubAssignerModel:
                 reference for a club assignment; farther colors are referees.
             referee_color (Optional[Tuple[int, int, int]]): RGB reference color
                 of the referee jersey.
-            referee_match_dist (float): Maximum weighted HSV distance to the
-                referee reference for a referee assignment.
-            gk_match_dist (float): Maximum weighted HSV distance to a goalkeeper
-                reference for a player-class sample to be that team's goalkeeper.
+            referee_hue_tol_deg (float): Maximum circular hue distance to the
+                referee reference hue for a referee assignment (brightness and
+                saturation of the sample must also be reasonable).
+            gk_match_dist (float): Maximum weighted HSV distance to a colored
+                goalkeeper reference for a player-class sample to be that
+                team's goalkeeper.
+            gk_dark_match_dist (float): Same for dark goalkeeper references
+                (lower brightness); dark references match only dark samples.
         """
         self.player_centroids = np.array([club1.player_jersey_color, club2.player_jersey_color])
         self.goalkeeper_centroids = np.array([club1.goalkeeper_jersey_color, club2.goalkeeper_jersey_color])
         self.player_hsv = np.array([self._rgb_to_hsv(c) for c in self.player_centroids])
         self.goalkeeper_hsv = np.array([self._rgb_to_hsv(c) for c in self.goalkeeper_centroids])
         self.referee_assign_dist = float(referee_assign_dist)
-        self.referee_match_dist = float(referee_match_dist)
+        self.referee_hue_tol_deg = float(referee_hue_tol_deg)
         self.gk_match_dist = float(gk_match_dist)
+        self.gk_dark_match_dist = float(gk_dark_match_dist)
         self.referee_hsv = (
             np.array(self._rgb_to_hsv(referee_color)) if referee_color is not None else None
         )
+
+    def _is_referee_color(self, hsv, min_sat: float = 60.0, min_val: float = 60.0) -> bool:
+        """Hue-based referee color check, robust to lighting.
+
+        A sample is a referee color only when its hue is within
+        `referee_hue_tol_deg` of the referee reference hue, is reasonably
+        saturated/bright, and is closer to the referee hue than to both club
+        hues. Weighted distance is deliberately not used here: bright colors
+        near the hue circle (e.g. a bright red jersey) would otherwise be
+        pulled to the referee reference by the brightness term.
+        """
+        if self.referee_hsv is None:
+            return False
+        if float(hsv[1]) < min_sat or float(hsv[2]) < min_val:
+            return False
+        dh_ref = ClubAssigner._hue_dist(float(hsv[0]), float(self.referee_hsv[0]))
+        if dh_ref > self.referee_hue_tol_deg:
+            return False
+        dh_clubs = [ClubAssigner._hue_dist(float(hsv[0]), float(r[0])) for r in self.player_hsv]
+        return dh_ref < min(dh_clubs)
+
+    def _gk_threshold(self, ref: np.ndarray) -> float:
+        """Match threshold for a goalkeeper reference (dark refs match tighter)."""
+        return self.gk_match_dist if float(ref[2]) >= 60.0 else self.gk_dark_match_dist
 
     @staticmethod
     def _rgb_to_hsv(color: Tuple[int, int, int]) -> Tuple[float, float, float]:
@@ -631,28 +659,25 @@ class ClubAssignerModel:
         if is_goalkeeper:
             gk_distances = np.array([self._hsv_distance(hsv, r) for r in self.goalkeeper_hsv])
             best = int(np.argmin(gk_distances))
-            if self.referee_hsv is not None:
-                d_ref = float(self._hsv_distance(hsv, self.referee_hsv))
-                if d_ref < float(gk_distances[best]) and d_ref <= self.referee_match_dist:
-                    return None
+            if self._is_referee_color(hsv, min_sat=30.0, min_val=25.0):
+                return None
             return best
 
         club_distances = np.array([self._hsv_distance(hsv, r) for r in self.player_hsv])
         best = int(np.argmin(club_distances))
 
-        # Referee reference check first: a shadowed referee jersey stays
-        # closer to the referee reference than to any other reference.
-        if self.referee_hsv is not None:
-            d_ref = float(self._hsv_distance(hsv, self.referee_hsv))
-            if d_ref < float(club_distances[best]) and d_ref <= self.referee_match_dist:
-                return None
+        # Referee reference check first: hue-based, so lighting shifts on the
+        # referee jersey do not lose the match, while other bright colors
+        # (e.g. a red substitute bib) are not stolen by the brightness term.
+        if self._is_referee_color(hsv):
+            return None
 
         # Goalkeeper reference match: a player-class sample whose jersey
         # matches a goalkeeper reference is that team's goalkeeper.
         gk_distances = np.array([self._hsv_distance(hsv, r) for r in self.goalkeeper_hsv])
         gk_best = int(np.argmin(gk_distances))
         if (
-            float(gk_distances[gk_best]) <= self.gk_match_dist
+            float(gk_distances[gk_best]) <= self._gk_threshold(self.goalkeeper_hsv[gk_best])
             and float(gk_distances[gk_best]) < float(club_distances[best])
         ):
             return gk_best

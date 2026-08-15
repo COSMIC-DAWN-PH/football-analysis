@@ -32,3 +32,5 @@ lessons/
 training-data/
 
 logs/
+
+eval/finetune_dataset/
