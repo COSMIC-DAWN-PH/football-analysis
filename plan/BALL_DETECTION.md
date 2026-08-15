@@ -98,7 +98,7 @@
 
 | 文件 | 改动 |
 |------|------|
-| `tools/detect_ball_tracks.py` / `extract_ball_candidates.py` / `prefill_ball_labels.py` / `eval_ball.py` / `build_ball_finetune_dataset.py` | 新增（Phase 0/2/4） |
+| `tools/detect_ball_tracks.py` / `extract_ball_candidates.py` / `prefill_ball_labels.py` / `make_ball_sheets.py` / `run_ball_batch.ps1` / `eval_ball.py` / `build_ball_finetune_dataset.py` | 新增（Phase 0/2/4；网格图批量审核工具 make_ball_sheets 为本轮新增） |
 | `tracking/ball_tracker.py` | Phase 3 参数级修复（NMS/尺寸门/运动门/确认与重启参数） |
 | `ball_to_player_assignment/ball_to_player_assigner.py` | 归属距离/grace 复核（如归因命中） |
 | `eval/ball_crops/{demo1..4,raw1,raw2}/` | 候选 crop + final_ball_labels.jsonl（图片不入 git） |

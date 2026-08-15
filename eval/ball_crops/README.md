@@ -25,9 +25,9 @@
 
 ## 流程
 
-1. 双模型预填：openchamber 会话分别写 `qwen_labels.jsonl` / `luna_labels.jsonl`（每行 `{"id": ..., "label": "ball"|"not_ball"|"null", "reason": "..."}`）；
+1. 双模型预填：openchamber 会话（qwen3.7plus / gpt5.6luna）按 `sheets/` 网格图逐张看图（每张 20 个 crop，格子左上角有 id 编号），分别写 `qwen_labels.jsonl` / `luna_labels.jsonl`（每行 `{"id": ..., "label": "ball"|"not_ball"|"null", "reason": "..."}`）；网格图由 `tools/make_ball_sheets.py` 生成，单张核对可用 `crops/<id>.png`；
 2. `python tools/prefill_ball_labels.py --merge-qwen ... --merge-luna ... --manifest candidates.jsonl` 合并并产出 `disagreements.jsonl` 与 `review_order.txt`；
-3. 人工按 review_order 全量审核，直接改 `candidates.jsonl` 里的 `manual_label`（不存在的字段加上即可）；
+3. 人工按 review_order 全量审核（建议同样按 sheets 网格图浏览，不确定的格子回 `crops/<id>.png` 放大看），直接改 `candidates.jsonl` 里的 `manual_label`（不存在的字段加上即可）；
 4. `python tools/prefill_ball_labels.py --report --manifest candidates.jsonl` 检查审核进度。
 
 ## 评估口径
