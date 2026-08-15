@@ -34,7 +34,8 @@ def _load_manifest(path: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
-def _load_labels(path: Path) -> dict[str, tuple[str, str]]:
+def _load_labels(path) -> dict[str, tuple[str, str]]:
+    path = Path(path)
     labels = {}
     for line in path.read_text(encoding="utf-8").splitlines():
         d = json.loads(line)
@@ -113,11 +114,11 @@ def _merge(args) -> None:
           f"agree={agree} disagree={disagree} single={single} "
           f"(fields: {', '.join(fields) or 'none'})")
 
-    disagreements = [
-        iid for i in items
-        if len({item[f] for f in fields if item.get(f) is not None}) > 1
-        for iid in [item["id"]]
-    ]
+    disagreements = []
+    for item in items:
+        vals = {item[f] for f in fields if item.get(f) is not None}
+        if len(vals) > 1:
+            disagreements.append(item["id"])
     d_path = args.manifest.parent / "disagreements.jsonl"
     d_path.write_text("\n".join(disagreements) + "\n", encoding="utf-8")
     print(f"disagreement ids -> {d_path} ({len(disagreements)} items, review first)")
