@@ -35,5 +35,6 @@ logs/
 
 eval/finetune_dataset/
 
-# Ball review crop images (manifests/labels are committed)
+# Ball review crop images and contact sheets (manifests/labels are committed)
 eval/ball_crops/*/crops/
+eval/ball_crops/*/sheets/
