@@ -134,7 +134,9 @@
 
 ### Phase 0 推进补充（2026-08-15 当日）
 
-- 审核集产出：demo4 2956 项 / demo1 1763 项（89 网格图）/ demo3 3001 项（151 网格图）；raw1/raw2 检测进行中（预计各 ~35k 项）。
-- 双模型预标进度：luna 完成 demo4（2956）+ demo1（1763）；demo3 由新会话续标（已 800，原会话上下文耗尽）；kimi 完成 demo4 2700/2956 后触发 opencode-go 5h 限额（约 2h 后自动重试续标 demo4 剩余 256 条→demo1→demo3）。
-- demo4 标签合并：2700 条共同标注中 **1186 条分歧（44%）**，主要模式 luna=not_ball/kimi=ball（365）、luna=null/kimi=ball（349）——双模型对"球"的宽容度差异大，人工全审价值被验证；分歧清单 `eval/ball_crops/demo4/disagreements.jsonl` + `review_order.txt` 已产出。
-- 期间修复：merge 工具分歧清单作用域 bug；`--merge-labels PATH FIELD` 通用化（kimi 顶替 qwen）；低置信孤立簇过滤政策（用户确认）。
+- 审核集产出：demo4 2956 项 / demo1 1763 项（89 网格图）/ demo3 3001 项（151 网格图）/ demo2 3004 项（151 网格图）/ raw1 30631 项（1532 网格图）/ raw2 30572 项（1529 网格图），**6 视频共 71,927 审核项**。
+- 双模型预标进度：luna 完成 demo4（2956）+ demo1（1763）；demo3 由新会话续标（已 800，原会话上下文耗尽）；kimi 完成 demo4 2700/2956 后触发 opencode-go 5h 限额（约 18:40 重置后自动重试续标 demo4 剩余 256 条→demo1→demo3→demo2）。
+- raw 预标队列已建：luna-raw1/raw2、kimi-raw1/raw2 四会话 + demo2 挂接 kimi/luna 主队列；全部采用"每 20 张 sheet 落盘、断点续标"协议。
+- demo4 标签合并：2700 条共同标注中 **1186→1284 条分歧（~45%）**，主要模式 luna=not_ball/kimi=ball、luna=null/kimi=ball——双模型对"球"的宽容度差异大，人工全审价值被验证；分歧清单 `eval/ball_crops/demo4/disagreements.jsonl` + `review_order.txt` 已产出，**demo4 可开始人工审核**。
+- 期间修复：merge 工具分歧清单作用域 bug；`--merge-labels PATH FIELD` 通用化（kimi 顶替 qwen）；低置信孤立簇过滤政策（用户确认）；标签文件去重；会话 scratch 文件 gitignore。
+- Phase 2 工具先行：`tools/eval_ball.py` 已落地（crop 级 precision/采样召回代理 + track 级段统计/确认延迟），demo4 空标签自检通过。
