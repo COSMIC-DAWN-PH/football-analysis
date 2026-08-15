@@ -5,6 +5,7 @@
 - 来源：`tools/detect_ball_tracks.py` 全量球检测+跟踪（`output_videos/<src>/ball/ball_tracks.jsonl`，生产参数 conf=0.02、整帧+2×2 tile），由 `tools/extract_ball_candidates.py` 提取。
 - 目录结构：`eval/ball_crops/<src>/crops/<id>.png` 为图片；`candidates.jsonl` 为清单（含 `manual_label` / `qwen_label` / `luna_label` 字段）。
 - 审核对象 = 清单里的**每一张**图片（本轮 100% 人工审核，无抽样）。
+- 过滤政策（用户 2026-08-15 确认）：`unconfirmed` 中 **conf < 0.05 且只出现在单帧的孤立簇**不进入审核集（`extract_ball_candidates.py` 默认 `--drop-low-single`），其余全部人工审核。
 
 ### 五类候选
 

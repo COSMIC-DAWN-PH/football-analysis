@@ -29,7 +29,7 @@
 2. **补上 FN 盲区**：上轮只评了"检出来的对不对"（precision），几乎没评"该检的漏没漏"（recall）。本轮增加**漏检扫描**：双模型在无检测帧上找"像球但被漏"的候选，同样进人工审核 → 召回率有真实度量。
 3. **track 级指标**：球与裁判不同，观感问题主要在轨迹连续性。新增断段率、虚接率、确认延迟指标，直接对应"球框闪断/粘鞋"等用户可见问题。
 4. **误差模式分类驱动修复**：每个 FN/FP 标注归因（远/小/模糊/遮挡/鞋袜/线/灯/头），修复按归因命中率排序，不做盲调。
-5. **双模型预筛 + 仲裁降本**：qwen3.7plus 与 gpt5.6luna 先各预标一遍（人只做确认/纠错），分歧样本优先审，人工审核 100% 覆盖但单张耗时大幅下降。
+5. **双模型预筛 + 仲裁降本**：kimi-k2.7-code 与 gpt-5.6-luna 先各预标一遍（人只做确认/纠错；qwen3.7plus 在 openchamber 不可用，经用户确认由 kimi-k2.7-code 顶替），分歧样本优先审，人工审核 100% 覆盖但单张耗时大幅下降。
 6. **6 视频多场次**：raw1/2（同场）供训练/回归，demo1~4（多场次、含 demo1/3/4 全新场）做未见过场次评估与微调 test，split 纪律沿用 training/README。
 7. **产出 ball 类微调数据集**（含硬负样本），对齐 training/README 门槛（≥600 球正样本、≥75% recall / ≥90% precision 才 promote 权重）。
 
@@ -47,7 +47,7 @@
 2. 实现模型：`opencode-go/deepseek-v4-pro`；验证模型：`opencode-go/qwen3.7plus` 与 `opencode-go/gpt5.6luna`（用户指定，代替上轮 kimi/luna 组合；**执行时发现 qwen3.7plus 在 openchamber 中不可用，经用户确认改用 `opencode-go/kimi-k2.7-code` 代替**）；
 3. 验证模型**不得只读实现方结论**：必须自己看图核对判定、自己跑 eval 复算指标、复核 diff，给出"通过/不通过 + 理由"；
 4. 标注环节：双模型只做**预标与仲裁辅助**，`manual_label`（人工）为唯一权威；分歧样本（双模型不一致）必须人工裁决；
-5. 全部 Phase 完成后 qwen3.7plus 与 gpt5.6luna 各一次独立交叉复核，均通过才算整体完成；
+5. 全部 Phase 完成后 kimi-k2.7-code 与 gpt-5.6-luna 各一次独立交叉复核，均通过才算整体完成；
 6. 全程记录到本文档「推进记录」。
 
 ## 5. 人工审核口径（本轮核心变化：100% 审核）
@@ -57,11 +57,14 @@
 | 类别 | 内容 | 每段张数 |
 |------|------|----------|
 | confirmed | 已确认 track segment 的最清晰帧（小图放大、帧距 ≥15） | ≤3 张/segment |
-| unconfirmed | 未确认的孤立候选/被运动门拒绝的候选（FP 高发区，**必审**） | 1 张/候选 |
-| fn_sweep | 双模型在无检测帧上扫出的"像球但漏检"候选（FN 高发区，**必审**） | 1 张/候选 |
+| unconfirmed | 未确认的孤立候选/被运动门拒绝的候选（FP 高发区，**必审**；过滤政策见下） | 1 张/簇 |
+| fn_sweep | bridge（段内预测帧）+ gap（段间断档中点）+ global（空帧抽样）三类漏检候选（FN 高发区，**必审**） | 1 张/候选 |
+
+- 过滤政策（用户确认）：`unconfirmed` 簇中 **conf<0.05 且单帧孤立**（cluster_frames≤1）不进审核集（`--drop-low-single` 默认开启），其余 100% 审核；demo4 实测该政策去掉 337/1132 簇，全量预估 ~91k → ~75k；
+- 审核载体：`tools/make_ball_sheets.py` 生成的网格图（20 张/张，带 id 编号），双模型与人工都按网格图批量审，不确定的格子回 `crops/<id>.png` 放大看；
 
 - 标注值：`ball` / `not_ball`（白鞋、袜、线、灯、头、手套等硬负样本写具体类别）/ `null`（太小、模糊到无法判定，不进评估但保留）；
-- 双模型预填 `qwen_label` / `luna_label` 后，人工**逐张确认或纠错**，分歧样本优先审；
+- 双模型预填 `kimi_label` / `luna_label` 后，人工**逐张确认或纠错**，分歧样本优先审；
 - 定稿产物：`eval/ball_crops/{src}/final_ball_labels.jsonl`（权威），附审核进度清单（缺审即验收不通过）。
 
 ## 6. Phase 划分
@@ -69,7 +72,7 @@
 ### Phase 0 — 全量检测+候选提取+双模型预标
 - `tools/detect_ball_tracks.py`（新增）：6 视频全量球检测+跟踪（不含球员/关键点，GPU/NPU 并行），写 `raw/ball_tracks.jsonl`（含 segment/confidence/observed 全字段，供后续一切评估）；
 - `tools/extract_ball_candidates.py`（新增）：按 §5 生成三来源候选 crop + auto 预填清单（conf、segment、尺寸、距预测点偏差等特征列）；
-- `tools/prefill_ball_labels.py`（新增）：qwen3.7plus、gpt5.6luna 各写一份预标 jsonl，输出共识/分歧两份清单，分歧优先审；
+- `tools/prefill_ball_labels.py`（新增）：kimi-k2.7-code、gpt-5.6-luna 各写一份预标 jsonl，输出共识/分歧两份清单，分歧优先审；
 - 分支 commit；产出即 Phase 1 审核材料。
 
 ### Phase 1 — 全量人工审核（用户执行，本轮不做抽样）
@@ -83,7 +86,7 @@
 
 ### Phase 3 — 参数级修复（按归因排序，逐项独立 commit + 验证门）
 - 候选修复项（以实测归因为准，先按优先级）：conf 自适应/NMS 收紧（FP）；tile 重叠或分辨率调整、最小尺寸下限（FN）；尺寸门 48px/5% 与宽高比复核（FP/归属）；restart_gap / confirmations / max_prediction / 运动门距离曲线（断段/虚接）；归属距离与 grace（粘脚）；
-- 每项修复后：`eval_ball.py` 同口径对比 + qwen3.7plus 或 gpt5.6luna 验证门裁决（不通过即回退重做）。
+- 每项修复后：`eval_ball.py` 同口径对比 + kimi-k2.7-code 或 gpt-5.6-luna 验证门裁决（不通过即回退重做）。
 
 ### Phase 4 — ball 微调数据集 + 云端训练（数据侧本轮必产出，训练可与 YOLO_FINETUNE 并行）
 - `tools/build_ball_finetune_dataset.py`（新增/复用 build_finetune_dataset）：以 final_ball_labels 回填正确框；`ball` 正样本 + `not_ball` 硬负样本（鞋/袜/线/灯/头/手套）打包成 YOLO 二分类数据集；split 纪律：整场视频不跨 split、demo1~4 至少一场全新进 test、相邻帧不跨 split；
@@ -92,7 +95,7 @@
 
 ### Phase 5 — 终验
 - 6 视频全量重放：demo1~4 未见过场次看效果 + raw1/2 回归；track 级指标与归属抽看；老验收（referee 标注集、34-crop balanced acc、pytest）不回退；端到端速度 ≤20% 回退；
-- qwen3.7plus + gpt5.6luna 双模型交叉复核（看图、复算、diff）均通过后关闭。
+- kimi-k2.7-code + gpt-5.6-luna 双模型交叉复核（看图、复算、diff）均通过后关闭。
 
 ## 7. 涉及文件
 
@@ -112,7 +115,7 @@
 3. track 级：断段率/虚接率较基线下降，确认延迟不劣化；
 4. 前两轮回归：referee 标注集指标、34-crop balanced acc=1.0、全量 pytest 绿；
 5. 端到端处理速度下降 ≤20%；
-6. 双模型（qwen3.7plus / gpt5.6luna）交叉复核均通过。
+6. 双模型（kimi-k2.7-code / gpt-5.6-luna）交叉复核均通过。
 
 ## 9. 风险与对策
 
@@ -127,4 +130,4 @@
 
 | Phase | 实现模型 | 验证模型 | 基线指标 | 完成后指标 | 裁决 | 提交 |
 |-------|----------|----------|----------|------------|------|------|
-| 0 | opencode-go/deepseek-v4-pro | — | — | 工具链落地：`detect_ball_tracks.py`/`extract_ball_candidates.py`/`prefill_ball_labels.py`/`run_ball_batch.ps1`；demo4 600 帧冒烟：0.51 item/帧、77 段/20s（断段严重）；6 视频全量检测后台运行中（NPU 队列 + GPU 队列） | — | 见提交 |
+| 0 | opencode-go/deepseek-v4-pro | — | — | 工具链落地（检测/提取/合并/网格图/批量脚本）+ 冒烟；6 视频全量检测后台运行（NPU/GPU 双队列）；demo4 完成：4523 帧、753 段（断段极严重）、2956 审核项/148 网格图（过滤政策去掉 337 低置信孤立簇）；kimi+luna 预标会话已起 | — | cb2c151→673aac6→a2cf126 |

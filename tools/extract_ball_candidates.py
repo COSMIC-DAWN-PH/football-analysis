@@ -89,7 +89,11 @@ def _save_crop(frame, crop_box, target_dim, out_path, draw_bbox=None):
         if scale != 1.0:
             bx = [int(v * scale) for v in bx]
         color = (0, 0, 255)
-        cv2.rectangle(tile, (bx[0], bx[1]), (bx[2], bx[3]), color, 1)
+        cv2.rectangle(
+            tile,
+            (int(bx[0]), int(bx[1])), (int(bx[2]), int(bx[3])),
+            color, 1,
+        )
     cv2.imwrite(str(out_path), tile)
     return tile.shape
 
@@ -102,6 +106,12 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--max-per-segment", type=int, default=MAX_PER_SEGMENT)
     parser.add_argument("--global-stride", type=int, default=GLOBAL_STRIDE)
+    parser.add_argument(
+        "--drop-low-single", action=argparse.BooleanOptionalAction, default=True,
+        help="Drop unconfirmed clusters whose best confidence is < 0.05 AND "
+             "that only appear in one frame (user-approved filter policy to "
+             "keep the 100%-review set feasible; disable with --no-drop-low-single)",
+    )
     args = parser.parse_args()
 
     if not args.video.is_file():
@@ -188,9 +198,14 @@ def main() -> None:
                 break
         if not placed:
             clusters.append([(frame, t, bbox, conf)])
+    dropped_low_single = 0
     for ci, cluster in enumerate(clusters):
         best = max(cluster, key=lambda m: m[3])
         frame, t, bbox, conf = best
+        if (args.drop_low_single and conf < 0.05
+                and len({m[0] for m in cluster}) <= 1):
+            dropped_low_single += 1
+            continue
         margin = max(
             MIN_CONTEXT_PX,
             max(bbox[2] - bbox[0], bbox[3] - bbox[1]) * CONTEXT_MARGIN_FRAC,
@@ -335,7 +350,8 @@ def main() -> None:
     counts = Counter(e["category"] for e in manifest)
     print(f"{args.source}: {len(manifest)} review items -> {out_path}")
     print(f"  categories: {dict(counts)}")
-    print(f"  segments: {len(segments)}, untracked clusters: {len(clusters)}, "
+    print(f"  segments: {len(segments)}, untracked clusters: {len(clusters)} "
+          f"({dropped_low_single} dropped low-conf singletons), "
           f"blank frames: {len(blank_frames)}/{len(records)}")
 
 
