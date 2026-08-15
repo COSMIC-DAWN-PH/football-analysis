@@ -15,10 +15,10 @@ Review scope (plan/BALL_DETECTION.md section 5) - three sources of crops:
   global_sweep  blank frames (no candidates) sampled every N frames: blind
                 FN discovery, full-frame downscaled crop
 
-Every item is written to out/candidates.jsonl with manual_label/qwen_label/
-luna_label pre-seeded to null. The human reviews EVERY crop; the dual models
-(qwen3.7plus / gpt5.6luna) prefill their own label files which are merged
-back in by tools/prefill_ball_labels.py.
+Every item is written to out/candidates.jsonl with manual_label pre-seeded
+to null. The human reviews EVERY crop; the dual models (gpt-5.6-luna /
+kimi-k2.7-code, replacing qwen3.7plus which is unavailable) prefill their own
+label files which are merged back in by tools/prefill_ball_labels.py.
 
 Usage:
   python tools/extract_ball_candidates.py \
@@ -322,7 +322,7 @@ def main() -> None:
             "t": item["t"], "category": item["category"], "segment": item["segment"],
             "conf": item["conf"], "bbox": item["bbox"], "cluster": item["cluster"],
             "crop": item["crop"], "features": item["features"],
-            "manual_label": None, "qwen_label": None, "luna_label": None,
+            "manual_label": None,
         }
         manifest.append(entry)
 

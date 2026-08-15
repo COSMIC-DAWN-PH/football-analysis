@@ -21,12 +21,12 @@
 - `ball`：确实有一颗球在图中（写在 `manual_label`）
 - `not_ball`：不是球（可在 `manual_reason` 写：`shoe`/`sock`/`line`/`light`/`head`/`hand`/`other`）
 - `null`：太小/太糊无法判定（不进评估但保留）
-- 注意：`qwen_label` / `luna_label` 是双模型预填（`qwen3.7plus` / `gpt5.6luna`），人工以 `manual_label` 为准，**逐张确认或纠错**，分歧样本（`disagreements.jsonl`）优先审。
+- 注意：`kimi_label` / `luna_label` 是双模型预填（`kimi-k2.7-code` / `gpt-5.6-luna`；qwen3.7plus 不可用，由 kimi 代替），人工以 `manual_label` 为准，**逐张确认或纠错**，分歧样本（`disagreements.jsonl`）优先审。
 
 ## 流程
 
-1. 双模型预填：openchamber 会话（qwen3.7plus / gpt5.6luna）按 `sheets/` 网格图逐张看图（每张 20 个 crop，格子左上角有 id 编号），分别写 `qwen_labels.jsonl` / `luna_labels.jsonl`（每行 `{"id": ..., "label": "ball"|"not_ball"|"null", "reason": "..."}`）；网格图由 `tools/make_ball_sheets.py` 生成，单张核对可用 `crops/<id>.png`；
-2. `python tools/prefill_ball_labels.py --merge-qwen ... --merge-luna ... --manifest candidates.jsonl` 合并并产出 `disagreements.jsonl` 与 `review_order.txt`；
+1. 双模型预填：openchamber 会话（kimi-k2.7-code / gpt-5.6-luna）按 `sheets/` 网格图逐张看图（每张 20 个 crop，格子左上角有 id 编号），分别写 `kimi_labels.jsonl` / `luna_labels.jsonl`（每行 `{"id": ..., "label": "ball"|"not_ball"|"null", "reason": "..."}`）；网格图由 `tools/make_ball_sheets.py` 生成，单张核对可用 `crops/<id>.png`；
+2. `python tools/prefill_ball_labels.py --manifest candidates.jsonl --merge-labels kimi_labels.jsonl kimi_label --merge-labels luna_labels.jsonl luna_label` 合并并产出 `disagreements.jsonl` 与 `review_order.txt`；
 3. 人工按 review_order 全量审核（建议同样按 sheets 网格图浏览，不确定的格子回 `crops/<id>.png` 放大看），直接改 `candidates.jsonl` 里的 `manual_label`（不存在的字段加上即可）；
 4. `python tools/prefill_ball_labels.py --report --manifest candidates.jsonl` 检查审核进度。
 

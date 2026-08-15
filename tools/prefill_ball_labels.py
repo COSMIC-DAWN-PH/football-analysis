@@ -8,9 +8,9 @@ priority-ordered review lists (disagreements first).
 
 Usage:
   python tools/prefill_ball_labels.py --report --manifest eval/ball_crops/demo4/candidates.jsonl
-  python tools/prefill_ball_labels.py --merge-qwen eval/ball_crops/demo4/qwen_labels.jsonl \
-      --merge-luna eval/ball_crops/demo4/luna_labels.jsonl \
-      --manifest eval/ball_crops/demo4/candidates.jsonl
+  python tools/prefill_ball_labels.py --manifest eval/ball_crops/demo4/candidates.jsonl \
+      --merge-labels eval/ball_crops/demo4/luna_labels.jsonl luna_label \
+      --merge-labels eval/ball_crops/demo4/kimi_labels.jsonl kimi_label
 """
 import argparse
 import json
@@ -66,30 +66,33 @@ def _report(args) -> None:
 
 def _merge(args) -> None:
     items = _load_manifest(args.manifest)
-    qwen = _load_labels(args.merge_qwen) if args.merge_qwen else {}
-    luna = _load_labels(args.merge_luna) if args.merge_luna else {}
+    sources = {}
+    for path, field in args.merge_labels or []:
+        sources[field] = (_load_labels(path), path)
     by_id = {i["id"]: i for i in items}
-    missing_qwen = [iid for iid in by_id if iid not in qwen]
-    missing_luna = [iid for iid in by_id if iid not in luna]
-    if missing_qwen:
-        print(f"WARNING: qwen labels missing for {len(missing_qwen)} items")
-    if missing_luna:
-        print(f"WARNING: luna labels missing for {len(missing_luna)} items")
+    for field, (labels, path) in sources.items():
+        missing = [iid for iid in by_id if iid not in labels]
+        if missing:
+            print(f"WARNING: {field} labels missing for {len(missing)} items ({path})")
 
-    agree = disagree = only_qwen = only_luna = 0
+    agree = disagree = single = 0
     order = []
+    fields = list(sources.keys())
     for item in items:
         iid = item["id"]
-        ql, qr = qwen.get(iid, ("null", ""))
-        ll, lr = luna.get(iid, ("null", ""))
-        item["qwen_label"] = ql
-        item["qwen_reason"] = qr
-        item["luna_label"] = ll
-        item["luna_reason"] = lr
+        per = {}
+        for field in fields:
+            label, reason = sources[field][0].get(iid, (None, ""))
+            item[field] = label
+            if reason:
+                item[f"{field}_reason"] = reason
+            per[field] = label
         cat_rank = REVIEW_ORDER.get(item["category"], 9)
         conf = item["conf"] if item["conf"] is not None else -1.0
-        if iid in qwen and iid in luna:
-            if ql == ll:
+        present = [f for f in fields if per.get(f) is not None]
+        if len(present) >= 2:
+            first, *rest = [per[f] for f in present]
+            if all(v == first for v in rest):
                 agree += 1
                 item["priority"] = cat_rank
                 order.append((cat_rank, conf, iid))
@@ -97,15 +100,8 @@ def _merge(args) -> None:
                 disagree += 1
                 item["priority"] = -1
                 order.append((-1, conf, iid))
-        elif iid in qwen:
-            only_qwen += 1
-            item["priority"] = cat_rank
-            order.append((cat_rank, conf, iid))
-        elif iid in luna:
-            only_luna += 1
-            item["priority"] = cat_rank
-            order.append((cat_rank, conf, iid))
         else:
+            single += 1
             item["priority"] = cat_rank
             order.append((cat_rank, conf, iid))
 
@@ -114,11 +110,13 @@ def _merge(args) -> None:
         encoding="utf-8",
     )
     print(f"merged into {args.manifest}: "
-          f"agree={agree} disagree={disagree} qwen_only={only_qwen} luna_only={only_luna}")
+          f"agree={agree} disagree={disagree} single={single} "
+          f"(fields: {', '.join(fields) or 'none'})")
 
     disagreements = [
-        iid for i in items if i["qwen_label"] != i["luna_label"]
-        and i["qwen_label"] is not None and i["luna_label"] is not None
+        iid for i in items
+        if len({item[f] for f in fields if item.get(f) is not None}) > 1
+        for iid in [item["id"]]
     ]
     d_path = args.manifest.parent / "disagreements.jsonl"
     d_path.write_text("\n".join(disagreements) + "\n", encoding="utf-8")
@@ -134,12 +132,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--report", action="store_true")
-    parser.add_argument("--merge-qwen", type=Path, default=None)
-    parser.add_argument("--merge-luna", type=Path, default=None)
+    parser.add_argument(
+        "--merge-labels", nargs=2, action="append", metavar=("PATH", "FIELD"),
+        help="Merge a model label file into FIELD (repeatable), "
+             "e.g. --merge-labels luna_labels.jsonl luna_label "
+             "--merge-labels kimi_labels.jsonl kimi_label",
+    )
     args = parser.parse_args()
     if not args.manifest.is_file():
         raise FileNotFoundError(f"Missing manifest: {args.manifest}")
-    if args.report and not (args.merge_qwen or args.merge_luna):
+    if args.report and not args.merge_labels:
         _report(args)
     else:
         _merge(args)

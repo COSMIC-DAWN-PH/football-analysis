@@ -44,7 +44,7 @@
 ## 4. 工作方式（沿用前两轮验证门，模型名按本轮实际）
 
 1. 一个 Phase 一次推进，单独 commit；Phase 开始前记基线，完成后同口径对比；
-2. 实现模型：`opencode-go/deepseek-v4-pro`；验证模型：`opencode-go/qwen3.7plus` 与 `opencode-go/gpt5.6luna`（用户指定，代替上轮 kimi/luna 组合）；
+2. 实现模型：`opencode-go/deepseek-v4-pro`；验证模型：`opencode-go/qwen3.7plus` 与 `opencode-go/gpt5.6luna`（用户指定，代替上轮 kimi/luna 组合；**执行时发现 qwen3.7plus 在 openchamber 中不可用，经用户确认改用 `opencode-go/kimi-k2.7-code` 代替**）；
 3. 验证模型**不得只读实现方结论**：必须自己看图核对判定、自己跑 eval 复算指标、复核 diff，给出"通过/不通过 + 理由"；
 4. 标注环节：双模型只做**预标与仲裁辅助**，`manual_label`（人工）为唯一权威；分歧样本（双模型不一致）必须人工裁决；
 5. 全部 Phase 完成后 qwen3.7plus 与 gpt5.6luna 各一次独立交叉复核，均通过才算整体完成；
