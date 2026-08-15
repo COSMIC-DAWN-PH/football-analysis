@@ -73,7 +73,7 @@
 - `tools/detect_ball_tracks.py`（新增）：6 视频全量球检测+跟踪（不含球员/关键点，GPU/NPU 并行），写 `raw/ball_tracks.jsonl`（含 segment/confidence/observed 全字段，供后续一切评估）；
 - `tools/extract_ball_candidates.py`（新增）：按 §5 生成三来源候选 crop + auto 预填清单（conf、segment、尺寸、距预测点偏差等特征列）；
 - `tools/prefill_ball_labels.py`（新增）：kimi-k2.7-code、gpt-5.6-luna 各写一份预标 jsonl，输出共识/分歧两份清单，分歧优先审；
-- 分支 commit；产出即 Phase 1 审核材料。
+- 检测模型口径（重要）：本计划全部 tracks 用 `ball-detection_openvino_model_1280_fp16`（1280 固定尺寸导出，比 main.py 默认的 640 fp16 导出召回更高、小球更清晰）；Phase 2 基线与此同口径，Phase 3 可把"生产默认模型换成 1280 导出"作为一项修复候选；
 
 ### Phase 1 — 全量人工审核（用户执行，本轮不做抽样）
 - 用户审完全部 crop（§5 集合），`final_ball_labels.jsonl` 定稿；
