@@ -108,22 +108,43 @@
 | Phase | 实现模型 | 验证模型 | 基线指标 | 完成后指标 | 裁决 | 提交 |
 |-------|----------|----------|----------|------------|------|------|
 | 0 | opencode-go/deepseek-v4-pro | 用户人工标记 | — | 三源 tracks + demo2 标注定稿（113+48 张）+ raw 候选 721 张（精选 116 张待标） | 通过（demo2 标注完成） | 494596d |
-| 1 | opencode-go/deepseek-v4-pro | gpt-5.6-luna（首轮不过→复验通过）；kimi 待裁决 | 裁判黄色 player tracks 全被判 Maroon/Navy | 用户标注口径：crop recall 0.907 / precision 1.0；track recall 0.941 / precision 1.0；club preservation 0.9875/0.975；老验证集 balanced_acc=1.0；pytest 79 绿；门将支持：p210 91/91 navy、黑门将合成测试 maroon | luna 通过；kimi 待裁决 | fc5a4ff→820ec31→77af117→6a3ee83→40e628f |
+| 1 | opencode-go/deepseek-v4-pro | gpt-5.6-luna + kimi-k2.7-code | 裁判黄色 player tracks 全被判 Maroon/Navy | 用户标注口径：crop recall 0.907 / precision 1.0；track recall 0.941 / precision 1.0；club preservation 0.9875/0.975；老验证集 balanced_acc=1.0；pytest 80 绿；门将支持：p210 91/91 navy、黑门将合成测试 maroon | **luna 复验通过 + kimi 条件通过**（Phase 2 关闭） | fc5a4ff→820ec31→77af117→6a3ee83→40e628f→2e30213→dd39ffa |
+| 2 | 双模型验证 | — | — | 见下「Phase 2 裁决记录」 | 均通过 | — |
+| 3 | 进行中 | — | — | raw 全量重放+自洽统计；微调数据集种子（1857 图，`eval/finetune_dataset/` 不入 git）；端到端 demo2 重跑中 | — | — |
 
 ### Phase 1 实现要点与历次裁决
 
-- **实现**：`predict_referee()` 判定顺序 = 裁判参考色（`referee_match_dist` 75，`--referee-color` 实测裁判黄 RGB(168,156,74)）→ 门将参考色（`gk_match_dist` 60，`--club1/2-goalkeeper` 默认黑 (30,30,30)/深紫 (48,37,68)）→ 两队距离阈值 85（luna 裁决重标定：maroon 实测最大 83 / 黄衣最小 88 的安全区）→ 最近队；`extract_dark_jersey_stats()` 深色路径（val 25-105 & sat<90）支持黑门将；60 帧滑窗多数表决；referee 类反向纠正 + player 类 referee 旗标；annotator/projection 绘制联动。
+- **实现**：`predict_referee()` 判定顺序 = 裁判参考色（**hue 容差 15°**，`--referee-color` 实测裁判黄 RGB(168,156,74)）→ 门将参考色（`gk_match_dist` 60 / 深色门将 40，`--club1/2-goalkeeper` 默认黑 (30,30,30)/深紫 (48,37,68)）→ 两队距离阈值 85（luna 裁决重标定：maroon 实测最大 83 / 黄衣最小 88 的安全区）→ 最近队；`extract_dark_jersey_stats()` 深色路径（val 25-105 & sat<90）支持黑门将；60 帧滑窗多数表决；referee 类反向纠正 + player 类 referee 旗标；annotator/projection 绘制联动。
 - **luna 首轮（不通过）**：阈值 75 < maroon 最大 83；get_player_club 无拒绝出口 → 修复提交 820ec31（阈值 85 + 边界测试 + predict_referee 统一）。
 - **luna 复验（通过）**：独立复跑 pytest 75 绿、precision 1.0/recall 0.907/0.941、balanced acc 1.0；补充建议三参考色真实配置测试（已补 6a3ee83）。
-- **门将支持**（40e628f，用户提供门将色）：navy 门将深紫/黑门将合成测试通过；p210 91/91 帧判 navy、0 帧 referee；gpgk 类 track 由"恒 maroon"变为按色分（17 navy / 12 maroon）。
-- **已知残余**（Level B 范围）：r74/p28 ID 污染 track 滑窗滞后（4 张 FN）、p124 无数据帧（1 张）。
+- **kimi 裁决（条件通过）**：独立复跑全部一致；遗留项：① track 28 标签冲突（ID 污染 track，保持现状已记录）② get_player_club 行为变更需文档化 ③ 端到端速度未独立验证（Phase 3 补跑）。
+- **raw1 红球衣误判（dd39ffa）**：raw1 全量重放自洽检查发现被 flag 为裁判的 track 中只有 ~7/30 是真黄色，14/30 是红色区（鲜红球衣 hue 5-8 加权距离被黄色裁判参考色抢走）。修复：裁判色匹配改为**纯 hue 判定**（hue 容差 15° 且比两队 hue 都近）+ 门将阈值按参考色亮度分档（深色 40 / 彩色 60）；新增红球衣回归测试。修复后 demo2 指标无回退（precision 1.0 / recall 0.907/0.941 / balanced acc 1.0），pytest 80 绿。
+- **门将支持**（40e628f，用户提供门将色）：navy 门将深紫/黑门将合成测试通过；p210 91/91 帧判 navy、0 帧 referee。
+- **已知残余**（Level B 范围）：r74/p28 ID 污染 track 滑窗滞后（4 张 FN）、p124 无数据帧（1 张）、鲜红球衣人员会落入最近队（maroon）——非裁判非两队人员的归队无法靠颜色解决。
 
 ### p210 案例（用户两次确认）
 
 - p210 = **navy 队门将**（非藏青球员），深紫门将服 (48,37,68)；YOLO 全程 player 类（goalkeeper 类漏检）。
 - 标注词汇扩展 `navy_gk`/`maroon_gk`（按球队归属判定），`eval_referee.py` 支持；p210 3 张 verdict 图标 navy_gk，3/3 正确。
 
+### Phase 2 裁决记录（已关闭）
+
+- gpt-5.6-luna：首轮不通过（阈值 75）→ 修复后复验**通过**；独立复跑全部指标一致。
+- kimi-k2.7-code：**条件通过**——看图 48 张 verdict + 全 yellow/ref_cls 无不符；独立复跑 precision 1.0/recall 0.907/0.941/balanced acc 1.0/pytest 绿；遗留 4 项（见上）。
+
+### Level B 数据侧推进（本轮完成）
+
+- `tools/build_finetune_dataset.py`：三源抽帧（2s 间隔，1857 图）+ object-detection.pt 四类预标 + demo2 人工标注纠正误标（8 box）→ `eval/finetune_dataset/`（images/labels/manifest.csv/data.yaml/train-val-test.txt；split=raw1/raw2/demo2）。**目录不入 git**（.gitignore）。raw 标签经用户/双模型纠正后重跑即可回填。
+- `tools/raw_selfcheck.py` + `tools/check_flagged_hues.py`：raw 重放自洽统计与误判 hue 抽查（本轮发现红球衣问题的工具）。
+
 ### 人工标注状态（暂缓中）
 
 - demo2：✅ 已定稿（用户核正）。
-- raw1/raw2：⏸ 暂缓。已产出 721 张候选（auto 预填）+ 116 张精选子集（`eval/referee_crops/raw_labeling/`）；双模型多模态预标已排期（luna 先标、kimi 交叉），用户稍后只做纠正。
+- raw1/raw2：⏸ 暂缓。已产出 721 张候选（auto 预填）+ 116 张精选子集（`eval/referee_crops/raw_labeling/`）；**双模型多模态预标已派发**（luna、kimi 各标一遍交叉），用户稍后只做纠正。
+
+### 下一步（待后台任务 + 用户标注）
+
+1. 🔄 raw1/raw2 全量重放（修复后逻辑，后台）→ 完成后再跑自洽统计与红球衣复查；
+2. 🔄 demo2 端到端完整流水线重跑（后台，`output_videos/demo2-referee-final`）→ 肉眼确认 + 速度验证；
+3. 🔄 双模型 raw 子集预标 → 交叉一致性报告；
+4. ⏳ 用户纠正 raw 标签（最后一步）→ raw 三源评估（`eval_referee.py --tracks-map`）+ 微调数据集回填。
