@@ -137,14 +137,21 @@
 - `tools/build_finetune_dataset.py`：三源抽帧（2s 间隔，1857 图）+ object-detection.pt 四类预标 + demo2 人工标注纠正误标（8 box）→ `eval/finetune_dataset/`（images/labels/manifest.csv/data.yaml/train-val-test.txt；split=raw1/raw2/demo2）。**目录不入 git**（.gitignore）。raw 标签经用户/双模型纠正后重跑即可回填。
 - `tools/raw_selfcheck.py` + `tools/check_flagged_hues.py`：raw 重放自洽统计与误判 hue 抽查（本轮发现红球衣问题的工具）。
 
-### 人工标注状态（暂缓中）
+### 人工标注状态（✅ 完成）
 
 - demo2：✅ 已定稿（用户核正）。
-- raw1/raw2：⏸ 暂缓。已产出 721 张候选（auto 预填）+ 116 张精选子集（`eval/referee_crops/raw_labeling/`）；**双模型多模态预标已派发**（luna、kimi 各标一遍交叉），用户稍后只做纠正。
+- raw1/raw2：✅ 完成——双模型多模态预标（luna 写入 candidates.jsonl、kimi 写入 kimi_labels.jsonl，107/116 一致）+ 用户裁决 9 张分歧（5 标定、4 保持 null）→ `final_raw_labels.jsonl`（79 张有效标签）。
 
-### 下一步（待后台任务 + 用户标注）
+### Phase 3 终验结果（✅ 完成）
 
-1. 🔄 raw1/raw2 全量重放（修复后逻辑，后台）→ 完成后再跑自洽统计与红球衣复查；
-2. 🔄 demo2 端到端完整流水线重跑（后台，`output_videos/demo2-referee-final`）→ 肉眼确认 + 速度验证；
-3. 🔄 双模型 raw 子集预标 → 交叉一致性报告；
-4. ⏳ 用户纠正 raw 标签（最后一步）→ raw 三源评估（`eval_referee.py --tracks-map`）+ 微调数据集回填。
+1. **全片自洽（修复后）**：raw1/raw2 覆盖率 0.946/0.946（修复前 0.930）；被 flag 裁判的 player tracks 321/331（修复前 746/753）；referee 类恢复队色 1949/1943（修复前 1648/1639）。
+2. **红球衣误判复查**：各抽 40 条 flagged track 实测 hue——raw1 34/40、raw2 35/40 为真黄色裁判（修复前仅 7/30），红区误判 raw1 1 个 / raw2 0 个；其余为 ID 污染 track 的正常滑窗行为。
+3. **raw 终评（final_raw_labels，79 张）**：referee precision 1.0 / recall 0.79；yellow 类召回 0.85、ref_cls 类 1.0；club preservation 0.56——残差集中在 boundary 阴影漂移带（hue 87-94 的栗色球员），为颜色逻辑物理极限，属 Level B 范畴（已入微调数据集 hard cases）。
+4. **demo2 门**：全量端到端重跑成功（`output_videos/demo2-referee-final/demo2-analysis.mp4`，4494 帧）；demo2 标注集 referee precision 1.0/recall 0.907/0.941；老 34-crop balanced acc 1.0；pytest 80 绿。
+5. **微调数据集回填**：构建器修复（强制包含标注帧）后 2032 图、**213 个人工/模型修正框**（demo2 人工 + raw 双模型共识+用户裁决），split=raw1/raw2/demo2。
+
+### 遗留（Level B 任务清单）
+
+- YOLO 微调（CUDA 云机）：referee/goalkeeper 类召回提升——解决 ID 污染 track、门将漏检（p210 型）、与队服同色裁判、boundary 阴影漂移；训练入口 `training/train_models.py` 需加 `object` task。
+- 鲜红球衣人员（替补/工作人员）会落入最近队——非两队人员识别超出颜色逻辑范围，需 YOLO 类扩展或过滤策略。
+- gk 类 track 全片 100% 判 maroon（742/742 帧）——YOLO gk 类误检的球员/裁判被黑门将参考色拉走，微调后 gk 类变可靠才可解。

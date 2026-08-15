@@ -116,7 +116,14 @@ def main() -> None:
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         step = max(1, int(round(fps * args.interval)))
         frames = list(range(0, total, step))
-        print(f"{source}: sampling {len(frames)} frames (every {step} frames)")
+        # Always include frames that carry human corrections so the labeled
+        # examples are baked into the dataset (sampling grid and crop frames
+        # rarely coincide).
+        for (src, fi), _ in corrections.items():
+            if src == source and 0 <= fi < total and fi not in frames:
+                frames.append(fi)
+        frames.sort()
+        print(f"{source}: sampling {len(frames)} frames (every {step} frames + {sum(1 for (s, f) in corrections if s == source)} correction frames)")
 
         for fi in frames:
             cap.set(cv2.CAP_PROP_POS_FRAMES, fi)
