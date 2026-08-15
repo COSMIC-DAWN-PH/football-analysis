@@ -40,3 +40,5 @@ eval/ball_crops/*/crops/
 eval/ball_crops/*/sheets/
 eval/ball_crops/*/chunks/
 eval/ball_crops/*/sheet_ids.json
+eval/ball_crops/*/*_labels_part_*.jsonl
+eval/ball_crops/*/missing_block*.jsonl

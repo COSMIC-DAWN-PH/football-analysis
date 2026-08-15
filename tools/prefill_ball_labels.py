@@ -42,7 +42,8 @@ def _load_labels(path) -> dict[str, tuple[str, str]]:
         label = d.get("label")
         if label not in VALID_LABELS:
             raise ValueError(f"{path}: invalid label {label!r} for {d.get('id')}")
-        labels[d["id"]] = (label, d.get("reason", ""))
+        if d["id"] not in labels:
+            labels[d["id"]] = (label, d.get("reason", ""))
     return labels
 
 
