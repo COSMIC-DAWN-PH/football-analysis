@@ -55,7 +55,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--labels", type=Path, action="append", required=True)
     parser.add_argument("--tracks", type=Path, required=True)
+    parser.add_argument(
+        "--tracks-map",
+        type=Path,
+        default=None,
+        help="JSON mapping source name to a per-source tracks JSONL "
+        "(overrides --tracks for labeled entries with that source)",
+    )
     args = parser.parse_args()
+
+    tracks_map = {}
+    if args.tracks_map is not None:
+        tracks_map = json.loads(args.tracks_map.read_text(encoding="utf-8"))
 
     labels = []
     for path in args.labels:
@@ -68,6 +79,10 @@ def main() -> None:
         raise SystemExit("no labeled entries found; fill manual_label first")
 
     tracks_lines = args.tracks.read_text(encoding="utf-8").splitlines()
+    per_source_lines = {
+        source: Path(path).read_text(encoding="utf-8").splitlines()
+        for source, path in tracks_map.items()
+    }
 
     conf = collections.Counter()
     crop_correct = 0
@@ -80,9 +95,10 @@ def main() -> None:
         track_type = meta["track_type"]
         track_id = meta["track_id"]
         truth = meta["manual_label"]
-        if frame >= len(tracks_lines):
+        lines = per_source_lines.get(meta.get("source"), tracks_lines)
+        if frame >= len(lines):
             continue
-        d = json.loads(tracks_lines[frame])
+        d = json.loads(lines[frame])
         tr = d.get(track_type, {}).get(str(track_id))
         if tr is None:
             tr = d.get(track_type, {}).get(track_id)
