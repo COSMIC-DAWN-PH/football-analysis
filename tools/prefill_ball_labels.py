@@ -37,7 +37,7 @@ def _load_manifest(path: Path) -> list[dict]:
 def _load_labels(path) -> dict[str, tuple[str, str]]:
     path = Path(path)
     labels = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         d = json.loads(line)
         label = d.get("label")
         if label not in VALID_LABELS:
