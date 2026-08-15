@@ -38,3 +38,5 @@ eval/finetune_dataset/
 # Ball review crop images and contact sheets (manifests/labels are committed)
 eval/ball_crops/*/crops/
 eval/ball_crops/*/sheets/
+eval/ball_crops/*/chunks/
+eval/ball_crops/*/sheet_ids.json
