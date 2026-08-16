@@ -22,7 +22,14 @@
 - `ball`：确实有一颗球在图中（写在 `manual_label`）
 - `not_ball`：不是球（可在 `manual_reason` 写：`shoe`/`sock`/`line`/`light`/`head`/`hand`/`other`）
 - `null`：太小/太糊无法判定（不进评估但保留）
-- 注意：`kimi_label` / `luna_label` 是双模型预填（`kimi-k2.7-code` / `gpt-5.6-luna`；qwen3.7plus 不可用，由 kimi 代替），人工以 `manual_label` 为准，**逐张确认或纠错**，分歧样本（`disagreements.jsonl`）优先审。
+- 注意：模型预填字段按源不同——demo1~4 用 `kimi_label`（kimi 系）+ `luna_label`（gpt-5.6-luna）；raw1/raw2 用 `kimi_label`（kimi-k2.6）+ `qwen_label`（qwen3.7-plus，阿里 token plan，落盘文件沿用了 `luna_labels.jsonl` 旧名）。人工以 `manual_label` 为准，**逐张确认或纠错**，分歧样本（`disagreements.jsonl`）优先审。
+
+### 网页审核工具（推荐）
+
+- 启动：`python tools/ball_review_server.py --port 8100`，浏览器打开 http://127.0.0.1:8100
+- 按 `review_order.txt` 分歧优先排序导航；格子上直接着色显示双模型一致/分歧状态
+- 点击格子放大单张 crop，弹窗内快捷键：`1`=ball `2`=not_ball `3`=null `q/w/e/r/t/y/u`=非球原因（鞋/袜/线/灯/头/手套/其他） `Esc`=关闭；判定后自动跳到下一个未审格子
+- 标注即时保存进 `candidates.jsonl` 的 `manual_label` / `manual_reason` 字段（人工即权威）
 
 ## 流程
 
