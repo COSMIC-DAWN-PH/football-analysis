@@ -269,7 +269,7 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
 <div id="legend">
   格子着色：<span style="color:#6fdc8a">■人工=球</span> <span style="color:#ff8585">■人工=非球</span> <span style="color:#ffd75e">■人工=难判</span>
   <span style="color:#e8b14a">▢双模型分歧(优先审)</span> <span style="color:#3fae6e">▢双模型一致=球</span> <span style="color:#ae5a5a">▢一致=非球</span> <span style="color:#4a7dae">▢单模型</span>
-  点击格子放大；弹窗内 <kbd>1</kbd>=球 <kbd>2</kbd>=非球 <kbd>3</kbd>=难判 <kbd>q</kbd>鞋 <kbd>w</kbd>袜 <kbd>e</kbd>线 <kbd>r</kbd>灯 <kbd>t</kbd>头 <kbd>y</kbd>手套 <kbd>u</kbd>其他 <kbd>Esc</kbd>关闭
+  点击格子放大；弹窗内 <kbd>1</kbd>=球 <kbd>2</kbd>=非球 <kbd>3</kbd>=难判 <kbd>q</kbd>鞋 <kbd>w</kbd>袜 <kbd>e</kbd>线 <kbd>r</kbd>灯 <kbd>t</kbd>头 <kbd>y</kbd>手套 <kbd>u</kbd>其他 <kbd>Backspace</kbd>回退上一标 <kbd>0</kbd>清除 <kbd>Esc</kbd>关闭
 </div>
 <div id="modal">
   <img id="modalimg" alt="">
@@ -287,13 +287,15 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
       <button class="btn reason" onclick="setModal('not_ball','hand')">手套(y)</button>
       <button class="btn reason" onclick="setModal('not_ball','other')">其他(u)</button>
     </span>
+    <button class="btn" onclick="undo()">回退 (Backspace)</button>
+    <button class="btn" onclick="clearLabel()">清除 (0)</button>
     <button class="btn" onclick="closeModal()">关闭 (Esc)</button>
   </div>
 </div>
 <script>
 const SRC = "{{src}}";
 const COLS = 5, ROWS = 4;
-let data = null, idx = 0, cur = null, orderSeq = [], sheetsSeq = [];
+let data = null, idx = 0, cur = null, orderSeq = [], sheetsSeq = [], undoStack = [], curInfo = null;
 
 async function jget(u){const r = await fetch(u); return r.json();}
 async function jpost(u, b){const r = await fetch(u, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(b)}); return r.json();}
@@ -406,6 +408,7 @@ function go(sheetName){
 function openCell(id){
   fetch("/api/crop/" + SRC + "/" + id).then(r => r.json()).then(info => {
     cur = id;
+    curInfo = info;
     document.getElementById("modalimg").src = "/crop/" + SRC + "/" + info.crop;
     const m = info.models || {};
     const mtxt = Object.entries(m).map(([k,v]) => k.replace("_label","") + ":" + v).join(" · ") || "无预标";
@@ -419,7 +422,12 @@ function openCell(id){
   });
 }
 
-function closeModal(){ document.getElementById("modal").style.display = "none"; cur = null; }
+function closeModal(){
+  document.getElementById("modal").style.display = "none";
+  cur = null;
+  curInfo = null;
+  renderSheet();
+}
 
 function nextUnlabeled(){
   if (!data || !orderSeq.length) return null;
@@ -431,18 +439,43 @@ function nextUnlabeled(){
   return null;
 }
 
-function setModal(label, reason){
-  if (!cur) return;
+function applyLabel(label, reason, advance){
+  if (!cur || !curInfo) return;
   const id = cur;
+  const prevLabel = curInfo.manual === undefined ? null : curInfo.manual;
+  const prevReason = curInfo.reason === undefined ? null : curInfo.reason;
   const payload = [{id, label}];
   if (reason) payload[0].reason = reason;
   jpost("/api/save/" + SRC, payload).then(p => {
-    data.labeled[id] = label;
+    undoStack.push({id, label: prevLabel, reason: prevReason});
+    if (undoStack.length > 1000) undoStack.shift();
+    if (label === null) delete data.labeled[id]; else data.labeled[id] = label;
     data.labeled_count = p.labeled;
     document.getElementById("progress").textContent = "已审 " + p.labeled + "/" + p.total;
-    const nxt = nextUnlabeled();
-    if (nxt) { openCell(nxt); }
-    else { closeModal(); document.getElementById("modalinfo").innerHTML = "全部审完"; }
+    if (advance) {
+      const nxt = nextUnlabeled();
+      if (nxt) { openCell(nxt); }
+      else { closeModal(); }
+    } else {
+      openCell(id);
+    }
+  });
+}
+
+function setModal(label, reason){ applyLabel(label, reason || null, true); }
+function clearLabel(){ applyLabel(null, null, false); }
+
+function undo(){
+  if (!undoStack.length) return;
+  const last = undoStack.pop();
+  const id = last.id;
+  const payload = [{id, label: last.label}];
+  if (last.label !== null && last.reason) payload[0].reason = last.reason;
+  jpost("/api/save/" + SRC, payload).then(p => {
+    if (last.label === null) delete data.labeled[id]; else data.labeled[id] = last.label;
+    data.labeled_count = p.labeled;
+    document.getElementById("progress").textContent = "已审 " + p.labeled + "/" + p.total;
+    openCell(id);
   });
 }
 
@@ -460,6 +493,8 @@ document.addEventListener("keydown", (e) => {
   else if (k === "y") setModal("not_ball", "hand");
   else if (k === "u") setModal("not_ball", "other");
   else if (k === "escape") closeModal();
+  else if (k === "backspace") { e.preventDefault(); undo(); }
+  else if (k === "0") clearLabel();
   else if (k === "enter") { const n = nextUnlabeled(); if (n) openCell(n); }
 });
 
