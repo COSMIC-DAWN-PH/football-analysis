@@ -1,4 +1,5 @@
-"""Local ball review web UI. Serves contact sheets with per-cell label buttons.
+"""Local ball review web UI. Serves contact sheets with per-cell label buttons
+and the original video frame (0.5s window) next to the zoomed crop.
 
 Start:  python tools/ball_review_server.py [--port 8100]
 Open:   http://127.0.0.1:8100
@@ -13,10 +14,10 @@ from flask import Flask, jsonify, render_template_string, request, send_file
 
 ROOT = Path(__file__).resolve().parent.parent
 EVAL = ROOT / "eval" / "ball_crops"
+VIDEO_DIR = Path("C:/Personal Profile/Profile/Video")
 
 SOURCES = ["demo4", "demo1", "demo3", "demo2", "raw1", "raw2"]
 LABELS = {"ball", "not_ball", "null"}
-REASONS = ["shoe", "sock", "line", "light", "head", "hand", "other", "penalty_spot", "debris"]
 
 app = Flask(__name__)
 _cache = {}
@@ -71,14 +72,6 @@ def _progress(src):
     return {"total": len(item["rows"]), "labeled": labeled}
 
 
-def _model_fields(row):
-    out = {}
-    for f in ("kimi_label", "luna_label", "qwen_label"):
-        if row.get(f) is not None:
-            out[f] = row[f]
-    return out
-
-
 @app.get("/")
 def index():
     rows = []
@@ -105,7 +98,6 @@ def api_sheets(src):
     item = _load(src)
     labeled = {}
     categories = {}
-    ml = {}
     reasons = {}
     for r in item["rows"]:
         if r.get("manual_label") in LABELS:
@@ -113,9 +105,6 @@ def api_sheets(src):
             if r.get("manual_reason"):
                 reasons[r["id"]] = r["manual_reason"]
         categories[r["id"]] = r["category"]
-        models = _model_fields(r)
-        if models:
-            ml[r["id"]] = ";".join(f"{k}~{v}" for k, v in models.items())
     order = _review_order(src)
     if order is None:
         order = [iid for s in sheets for iid in s["ids"]]
@@ -124,11 +113,20 @@ def api_sheets(src):
         "labeled": labeled,
         "reasons": reasons,
         "categories": categories,
-        "ml": ml,
         "order": order,
         "total": len(item["rows"]),
         "labeled_count": len(labeled),
     })
+
+
+@app.get("/video/<src>")
+def video(src):
+    if src not in SOURCES:
+        return jsonify({"error": "bad src"}), 404
+    path = VIDEO_DIR / f"{src}.mp4"
+    if not path.is_file():
+        return jsonify({"error": "no video"}), 404
+    return send_file(str(path), conditional=True, mimetype="video/mp4")
 
 
 @app.get("/review/<src>")
@@ -173,8 +171,9 @@ def crop_info(src, iid):
         "crop": row["crop"],
         "category": row["category"],
         "frame": row["frame"],
+        "t": row["t"],
+        "bbox": row["bbox"],
         "conf": row["conf"],
-        "models": _model_fields(row),
         "manual": row.get("manual_label"),
         "reason": row.get("manual_reason"),
     })
@@ -205,8 +204,7 @@ td,th{border:1px solid #333;padding:8px 14px;text-align:left}
 <body>
 <h1>球检测人工审核</h1>
 <p>规则：eval/ball_crops/README.md —— 每格判定 ball / not_ball / null（太小太糊）。
-<br>先审分歧项（review_order 已把分歧排前），再按顺序全部过一遍。
-<br>你标的就是唯一权威（manual_label），双模型标签只作参考。</p>
+<br>纯人工审核：全部格子你逐一判定，标注即时保存，随时可回退修改。</p>
 <table><tr><th>源</th><th>总数</th><th>已审</th><th>进度</th></tr>
 {% for s, total, labeled in rows %}
 <tr><td><a href="/review/{{s}}">{{s}}</a></td><td>{{total}}</td>
@@ -232,7 +230,12 @@ header a{color:#7cb7ff;text-decoration:none}
 .cell-btn{position:absolute;box-sizing:border-box;cursor:pointer}
 .cell-btn:hover{border:3px solid #0af !important;background:rgba(255,255,255,.18)}
 #modal{position:fixed;inset:0;background:rgba(0,0,0,.92);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:20}
-#modal img{max-width:92vw;max-height:68vh}
+#mrow{display:flex;gap:14px;align-items:flex-start;justify-content:center;flex-wrap:wrap;max-width:97vw}
+#vidwrap{position:relative;display:inline-block;background:#000}
+#vid{display:block;max-width:62vw;max-height:64vh;width:auto;height:auto}
+#bboxov{position:absolute;border:2px solid #ff3b3b;box-shadow:0 0 8px rgba(255,60,60,.9);pointer-events:none;display:none;z-index:2}
+#modalimg{display:block;max-width:30vw;max-height:64vh;border:1px solid #333}
+#vidctl{margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 #modal .info{color:#ccc;margin:8px 0;font-size:14px;max-width:92vw;text-align:center}
 .btn{padding:8px 18px;margin:4px;border:1px solid #555;border-radius:6px;background:#2a2a2a;color:#eee;cursor:pointer;font-size:15px}
 .btn.act{background:#2d6d3f;border-color:#6fdc8a}
@@ -277,17 +280,23 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
   <span class="chip" style="border:2px solid #c084fc;background:rgba(160,110,240,.28)">已标:点球点</span>
   <span class="chip" style="border:2px solid #fb923c;background:rgba(240,140,70,.26)">已标:杂物</span>
   <span class="chip" style="border:2px solid #ffd75e;background:rgba(190,170,70,.22)">已标:难判</span>
-  <span class="chip" style="border:2px dashed #e8b14a;background:rgba(230,170,60,.16)">双模型分歧(先审)</span>
-  <span class="chip" style="border:1px solid #3fae6e;background:rgba(60,160,100,.14)">模型一致:球</span>
-  <span class="chip" style="border:1px solid #ae5a5a;background:rgba(170,80,80,.14)">模型一致:非球</span>
-  <span class="chip" style="border:1px solid #666;background:rgba(120,120,120,.10)">模型一致:难判</span>
-  <span class="chip" style="border:1px solid #4a7dae;background:rgba(70,120,170,.14)">单模型预标</span>
-  <span class="chip" style="border:1px solid #444">无预标</span>
-  <br>粗框=你已经标过的（优先显示）；细框/虚线=还没标，按双模型预标着色；鼠标悬停格子可看 id+模型标签详情
-  <br>弹窗内 <kbd>1</kbd>=球 <kbd>2</kbd>=非球 <kbd>3</kbd>=难判 <kbd>q</kbd>鞋 <kbd>w</kbd>袜 <kbd>e</kbd>线 <kbd>r</kbd>灯 <kbd>t</kbd>头 <kbd>y</kbd>手套 <kbd>u</kbd>其他 <kbd>p</kbd>点球点 <kbd>d</kbd>杂物 <kbd>[</kbd><kbd>]</kbd>已标间切换 <kbd>g</kbd>输入id/序号跳转 <kbd>Backspace</kbd>回退上一标 <kbd>0</kbd>清除 <kbd>Esc</kbd>关闭
+  <span class="chip" style="border:1px solid #444">未标</span>
+  <br>粗框=你已经标过的；未标格子为深灰细框；鼠标悬停格子可看 id+类别；审核按视频时间顺序
+  <br>弹窗内 <kbd>1</kbd>=球 <kbd>2</kbd>=非球 <kbd>3</kbd>=难判 <kbd>q</kbd>鞋 <kbd>w</kbd>袜 <kbd>e</kbd>线 <kbd>r</kbd>灯 <kbd>t</kbd>头 <kbd>y</kbd>手套 <kbd>u</kbd>其他 <kbd>p</kbd>点球点 <kbd>d</kbd>杂物 <kbd>v</kbd>重播视频 <kbd>l</kbd>循环 <kbd>[</kbd><kbd>]</kbd>已标间切换 <kbd>g</kbd>输入id/序号跳转 <kbd>Backspace</kbd>回退上一标 <kbd>0</kbd>清除 <kbd>Esc</kbd>关闭
 </div>
 <div id="modal">
-  <img id="modalimg" alt="">
+  <div id="mrow">
+    <div id="vidwrap">
+      <video id="vid" muted playsinline preload="auto"></video>
+      <div id="bboxov"></div>
+    </div>
+    <img id="modalimg" alt="">
+  </div>
+  <div id="vidctl">
+    <button class="btn" onclick="replay()">重播半秒 (v)</button>
+    <label class="btn" style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="loopchk"> 循环 (l)</label>
+    <span style="color:#9a9a9a;font-size:13px">拖动进度条可看任意帧</span>
+  </div>
   <div class="info" id="modalinfo"></div>
   <div id="modalbtns">
     <button class="btn act" onclick="setModal('ball')">是球 (1)</button>
@@ -316,23 +325,14 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
 const SRC = "{{src}}";
 const COLS = 5, ROWS = 4;
 const RZ = {shoe:"鞋", sock:"袜", line:"线", light:"灯", head:"头", hand:"手套", other:"其他", penalty_spot:"点球点", debris:"杂物"};
+const CLIP = 0.25;
 let data = null, idx = 0, cur = null, orderSeq = [], sheetsSeq = [], undoStack = [], curInfo = null;
+let curT = 0, curBbox = null, seekTimer = null;
 
 async function jget(u){const r = await fetch(u); return r.json();}
 async function jpost(u, b){const r = await fetch(u, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(b)}); return r.json();}
 
 function isLabeled(id){ return id in data.labeled; }
-
-function parseMl(id){
-  const s = data.ml[id];
-  if (!s) return {};
-  const out = {};
-  for (const part of s.split(";")) {
-    const [k, v] = part.split("~");
-    if (k) out[k.replace("_label","")] = v;
-  }
-  return out;
-}
 
 function cellStyle(id){
   const man = data.labeled[id];
@@ -343,16 +343,6 @@ function cellStyle(id){
     return {border:"2px solid #ff8585", background:"rgba(200,70,70,.30)"};
   }
   if (man === "null") return {border:"2px solid #ffd75e", background:"rgba(190,170,70,.22)"};
-  const m = parseMl(id);
-  const vals = Object.values(m);
-  const names = Object.keys(m);
-  if (vals.length >= 2) {
-    if (new Set(vals).size > 1) return {border:"2px dashed #e8b14a", background:"rgba(230,170,60,.16)"};
-    if (vals[0] === "ball") return {border:"1px solid #3fae6e", background:"rgba(60,160,100,.14)"};
-    if (vals[0] === "not_ball") return {border:"1px solid #ae5a5a", background:"rgba(170,80,80,.14)"};
-    return {border:"1px solid #666", background:"rgba(120,120,120,.10)"};
-  }
-  if (vals.length === 1) return {border:"1px solid #4a7dae", background:"rgba(70,120,170,.14)"};
   return {border:"1px solid #444", background:"rgba(255,255,255,.03)"};
 }
 
@@ -391,7 +381,6 @@ function renderSheet(){
   document.getElementById("sheetselect").value = sheetName;
   const cells = document.getElementById("cells");
   cells.innerHTML = "";
-  const wrap = document.getElementById("sheetwrap");
   data.sheetIds[sheetName].forEach((id, i) => {
     const b = document.createElement("div");
     b.className = "cell-btn";
@@ -403,8 +392,7 @@ function renderSheet(){
     const st = cellStyle(id);
     b.style.border = st.border;
     b.style.background = st.background;
-    const m = parseMl(id);
-    b.title = id + " " + (data.categories[id] || "") + " " + (Object.entries(m).map(([k,v])=>k+":"+v).join(" ") || "无预标") + (isLabeled(id) ? " [已标:" + data.labeled[id] + "]" : "");
+    b.title = id + " " + (data.categories[id] || "") + (isLabeled(id) ? " [已标:" + data.labeled[id] + (data.reasons[id] ? "/" + (RZ[data.reasons[id]] || data.reasons[id]) : "") + "]" : "");
     b.onclick = () => openCell(id);
     cells.appendChild(b);
   });
@@ -430,25 +418,70 @@ function go(sheetName){
   if (i >= 0) { idx = i; renderSheet(); }
 }
 
+function setupVideo(info){
+  const vid = document.getElementById("vid");
+  const ov = document.getElementById("bboxov");
+  curT = info.t;
+  curBbox = info.bbox;
+  const url = "/video/" + SRC;
+  if (vid.getAttribute("src") !== url) {
+    vid.setAttribute("src", url);
+  }
+  const b = curBbox;
+  const fullFrame = b && b[0] <= 0.5 && b[1] <= 0.5 && b[2] >= 1919.5 && b[3] >= 1079.5;
+  if (b && !fullFrame) {
+    ov.style.display = "block";
+    ov.style.left = (b[0] / 1920 * 100) + "%";
+    ov.style.top = (b[1] / 1080 * 100) + "%";
+    ov.style.width = ((b[2] - b[0]) / 1920 * 100) + "%";
+    ov.style.height = ((b[3] - b[1]) / 1080 * 100) + "%";
+  } else {
+    ov.style.display = "none";
+  }
+  replay();
+}
+
+function replay(){
+  const vid = document.getElementById("vid");
+  if (!vid) return;
+  const s = Math.max(0, curT - CLIP);
+  const e = curT + CLIP;
+  const start = () => {
+    vid.currentTime = s;
+    vid.play().catch(() => {});
+  };
+  vid.ontimeupdate = () => {
+    if (vid.currentTime >= e) {
+      if (document.getElementById("loopchk").checked) { vid.currentTime = s; return; }
+      vid.pause();
+    }
+  };
+  if (vid.readyState >= 1 && isFinite(vid.duration)) {
+    start();
+  } else {
+    vid.addEventListener("loadedmetadata", start, {once: true});
+  }
+}
+
 function openCell(id){
   fetch("/api/crop/" + SRC + "/" + id).then(r => r.json()).then(info => {
     cur = id;
     curInfo = info;
     document.getElementById("modalimg").src = "/crop/" + SRC + "/" + info.crop;
-    const m = info.models || {};
-    const mtxt = Object.entries(m).map(([k,v]) => k.replace("_label","") + ":" + v).join(" · ") || "无预标";
     const pos = orderSeq.indexOf(id);
     document.getElementById("modalinfo").innerHTML =
-      "<b>" + info.id + "</b> · " + info.category + " · frame " + info.frame + " · conf " + (info.conf === null ? "-" : Number(info.conf).toFixed(2)) +
-      "<br>模型: " + mtxt +
+      "<b>" + info.id + "</b> · " + info.category + " · frame " + info.frame + " · t=" + Number(info.t).toFixed(2) + "s · conf " + (info.conf === null ? "-" : Number(info.conf).toFixed(2)) +
       (info.manual ? " · 已标: " + (info.manual === "not_ball" && info.reason ? "非球(" + (RZ[info.reason] || info.reason) + ")" : info.manual) : "") +
       " · 顺序 " + (pos + 1) + "/" + orderSeq.length;
     document.getElementById("modal").style.display = "flex";
+    setupVideo(info);
   });
 }
 
 function closeModal(){
   document.getElementById("modal").style.display = "none";
+  const vid = document.getElementById("vid");
+  if (vid) vid.pause();
   cur = null;
   curInfo = null;
   renderSheet();
@@ -475,6 +508,9 @@ function applyLabel(label, reason, advance){
     undoStack.push({id, label: prevLabel, reason: prevReason});
     if (undoStack.length > 1000) undoStack.shift();
     if (label === null) delete data.labeled[id]; else data.labeled[id] = label;
+    if (label === null) delete data.reasons[id];
+    else if (reason) data.reasons[id] = reason;
+    else delete data.reasons[id];
     data.labeled_count = p.labeled;
     document.getElementById("progress").textContent = "已审 " + p.labeled + "/" + p.total;
     if (advance) {
@@ -498,6 +534,7 @@ function undo(){
   if (last.label !== null && last.reason) payload[0].reason = last.reason;
   jpost("/api/save/" + SRC, payload).then(p => {
     if (last.label === null) delete data.labeled[id]; else data.labeled[id] = last.label;
+    if (last.label === null || !last.reason) delete data.reasons[id]; else data.reasons[id] = last.reason;
     data.labeled_count = p.labeled;
     document.getElementById("progress").textContent = "已审 " + p.labeled + "/" + p.total;
     openCell(id);
@@ -548,6 +585,8 @@ document.addEventListener("keydown", (e) => {
   else if (k === "u") setModal("not_ball", "other");
   else if (k === "p") setModal("not_ball", "penalty_spot");
   else if (k === "d") setModal("not_ball", "debris");
+  else if (k === "v") replay();
+  else if (k === "l") { const c = document.getElementById("loopchk"); c.checked = !c.checked; }
   else if (k === "escape") closeModal();
   else if (k === "backspace") { e.preventDefault(); undo(); }
   else if (k === "0") clearLabel();
