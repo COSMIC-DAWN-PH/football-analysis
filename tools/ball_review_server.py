@@ -238,7 +238,8 @@ header a{color:#7cb7ff;text-decoration:none}
 .btn:hover{filter:brightness(1.25)}
 #nav{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .sel{background:#1c1c1c;color:#eee;border:1px solid #444;padding:6px;border-radius:4px}
-#legend{font-size:13px;color:#9a9a9a;margin:4px 12px 16px;text-align:center}
+#legend{font-size:13px;color:#b9b9b9;margin:4px 12px 16px;text-align:center;line-height:1.9}
+.chip{display:inline-block;padding:1px 10px;margin:0 3px;border-radius:4px;background:#1c1c1c;white-space:nowrap}
 kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;font-size:12px}
 </style></head>
 <body>
@@ -267,9 +268,17 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
   <div id="cells"></div>
 </div>
 <div id="legend">
-  格子着色：<span style="color:#6fdc8a">■人工=球</span> <span style="color:#ff8585">■人工=非球</span> <span style="color:#ffd75e">■人工=难判</span>
-  <span style="color:#e8b14a">▢双模型分歧(优先审)</span> <span style="color:#3fae6e">▢双模型一致=球</span> <span style="color:#ae5a5a">▢一致=非球</span> <span style="color:#4a7dae">▢单模型</span>
-  点击格子放大；弹窗内 <kbd>1</kbd>=球 <kbd>2</kbd>=非球 <kbd>3</kbd>=难判 <kbd>q</kbd>鞋 <kbd>w</kbd>袜 <kbd>e</kbd>线 <kbd>r</kbd>灯 <kbd>t</kbd>头 <kbd>y</kbd>手套 <kbd>u</kbd>其他 <kbd>Backspace</kbd>回退上一标 <kbd>0</kbd>清除 <kbd>Esc</kbd>关闭
+  <span class="chip" style="border:2px solid #6fdc8a;background:rgba(60,190,110,.28)">已标:球</span>
+  <span class="chip" style="border:2px solid #ff8585;background:rgba(200,70,70,.30)">已标:非球</span>
+  <span class="chip" style="border:2px solid #ffd75e;background:rgba(190,170,70,.22)">已标:难判</span>
+  <span class="chip" style="border:2px dashed #e8b14a;background:rgba(230,170,60,.16)">双模型分歧(先审)</span>
+  <span class="chip" style="border:1px solid #3fae6e;background:rgba(60,160,100,.14)">模型一致:球</span>
+  <span class="chip" style="border:1px solid #ae5a5a;background:rgba(170,80,80,.14)">模型一致:非球</span>
+  <span class="chip" style="border:1px solid #666;background:rgba(120,120,120,.10)">模型一致:难判</span>
+  <span class="chip" style="border:1px solid #4a7dae;background:rgba(70,120,170,.14)">单模型预标</span>
+  <span class="chip" style="border:1px solid #444">无预标</span>
+  <br>粗框=你已经标过的（优先显示）；细框/虚线=还没标，按双模型预标着色；鼠标悬停格子可看 id+模型标签详情
+  <br>弹窗内 <kbd>1</kbd>=球 <kbd>2</kbd>=非球 <kbd>3</kbd>=难判 <kbd>q</kbd>鞋 <kbd>w</kbd>袜 <kbd>e</kbd>线 <kbd>r</kbd>灯 <kbd>t</kbd>头 <kbd>y</kbd>手套 <kbd>u</kbd>其他 <kbd>[</kbd><kbd>]</kbd>已标间切换 <kbd>g</kbd>输入id/序号跳转 <kbd>Backspace</kbd>回退上一标 <kbd>0</kbd>清除 <kbd>Esc</kbd>关闭
 </div>
 <div id="modal">
   <img id="modalimg" alt="">
@@ -287,6 +296,9 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
       <button class="btn reason" onclick="setModal('not_ball','hand')">手套(y)</button>
       <button class="btn reason" onclick="setModal('not_ball','other')">其他(u)</button>
     </span>
+    <button class="btn" onclick="stepLabeled(-1)">上一张已标 ([)</button>
+    <button class="btn" onclick="stepLabeled(1)">下一张已标 (])</button>
+    <input id="jumpin" class="sel" placeholder="跳: id 或序号 (g)" onkeydown="jumpKey(event)">
     <button class="btn" onclick="undo()">回退 (Backspace)</button>
     <button class="btn" onclick="clearLabel()">清除 (0)</button>
     <button class="btn" onclick="closeModal()">关闭 (Esc)</button>
@@ -479,8 +491,37 @@ function undo(){
   });
 }
 
+function stepLabeled(dir){
+  if (!data || !orderSeq.length) return;
+  const start = cur ? orderSeq.indexOf(cur) : -1;
+  for (let k = 1; k <= orderSeq.length; k++) {
+    const j = (start + dir * k + orderSeq.length * 2) % orderSeq.length;
+    if (isLabeled(orderSeq[j])) { openCell(orderSeq[j]); return; }
+  }
+}
+
+function jumpTo(t){
+  if (!data || !orderSeq.length) return;
+  let id = null;
+  if (/^\d+$/.test(t)) {
+    const n = parseInt(t, 10);
+    if (n >= 1 && n <= orderSeq.length) id = orderSeq[n - 1];
+  } else if (data.sheetOf[t]) {
+    id = t;
+  }
+  if (id) {
+    openCell(id);
+    document.getElementById("jumpin").value = "";
+  }
+}
+
+function jumpKey(e){
+  if (e.key === "Enter") jumpTo(e.target.value);
+}
+
 document.addEventListener("keydown", (e) => {
   if (document.getElementById("modal").style.display !== "flex") return;
+  if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA")) return;
   const k = e.key.toLowerCase();
   if (k === "1") setModal("ball");
   else if (k === "2") setModal("not_ball");
@@ -496,6 +537,9 @@ document.addEventListener("keydown", (e) => {
   else if (k === "backspace") { e.preventDefault(); undo(); }
   else if (k === "0") clearLabel();
   else if (k === "enter") { const n = nextUnlabeled(); if (n) openCell(n); }
+  else if (k === "[") stepLabeled(-1);
+  else if (k === "]") stepLabeled(1);
+  else if (k === "g") { e.preventDefault(); document.getElementById("jumpin").focus(); document.getElementById("jumpin").select(); }
 });
 
 fetch("/api/sheets/" + SRC).then(r => r.json()).then(d => {
