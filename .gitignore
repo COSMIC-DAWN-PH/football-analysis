@@ -42,3 +42,5 @@ eval/ball_crops/*/chunks/
 eval/ball_crops/*/sheet_ids.json
 eval/ball_crops/*/*_labels_part_*.jsonl
 eval/ball_crops/*/missing_block*.jsonl
+# Dual-model prelabel files are deprecated (manual-only workflow since 2026-08-16)
+eval/ball_crops/*/*_labels.jsonl
