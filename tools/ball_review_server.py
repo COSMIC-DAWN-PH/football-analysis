@@ -18,6 +18,8 @@ VIDEO_DIR = Path("C:/Personal Profile/Profile/Video")
 
 SOURCES = ["demo4", "demo1", "demo3", "demo2", "raw1", "raw2"]
 LABELS = {"ball", "not_ball", "null"}
+REASONS = ["shoe", "sock", "line", "light", "head", "hand", "penalty_spot",
+           "debris", "goal", "corner_flag", "referee", "other"]
 
 app = Flask(__name__)
 _cache = {}
@@ -282,7 +284,8 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
   <span class="chip" style="border:2px solid #ffd75e;background:rgba(190,170,70,.22)">已标:难判</span>
   <span class="chip" style="border:1px solid #444">未标</span>
   <br>粗框=你已经标过的；未标格子为深灰细框；鼠标悬停格子可看 id+类别；审核按视频时间顺序
-  <br>弹窗内 <kbd>1</kbd>=球 <kbd>2</kbd>=非球 <kbd>3</kbd>=难判 <kbd>q</kbd>鞋 <kbd>w</kbd>袜 <kbd>e</kbd>线 <kbd>r</kbd>灯 <kbd>t</kbd>头 <kbd>y</kbd>手套 <kbd>u</kbd>其他 <kbd>p</kbd>点球点 <kbd>d</kbd>杂物 <kbd>v</kbd>重播视频 <kbd>l</kbd>循环 <kbd>[</kbd><kbd>]</kbd>已标间切换 <kbd>g</kbd>输入id/序号跳转 <kbd>Backspace</kbd>回退上一标 <kbd>0</kbd>清除 <kbd>Esc</kbd>关闭
+  <br>两段式标注：<kbd>1</kbd>=是球 <kbd>2</kbd>=不是 → 再选原因 <kbd>q</kbd>鞋 <kbd>w</kbd>袜 <kbd>e</kbd>场地线 <kbd>r</kbd>灯 <kbd>t</kbd>头 <kbd>y</kbd>手/手套 <kbd>u</kbd>点球点 <kbd>i</kbd>场上杂物 <kbd>o</kbd>球门/球网 <kbd>p</kbd>角旗 <kbd>a</kbd>裁判/装备 <kbd>s</kbd>其他 <kbd>Enter</kbd>跳过原因 <kbd>Esc</kbd>返回 <kbd>3</kbd>=无法判断
+  <br>其他：<kbd>v</kbd>重播视频 <kbd>l</kbd>循环 <kbd>[</kbd><kbd>]</kbd>已标间切换 <kbd>g</kbd>输入id/序号跳转 <kbd>Backspace</kbd>回退上一标 <kbd>0</kbd>清除 <kbd>Esc</kbd>关闭
 </div>
 <div id="modal">
   <div id="mrow">
@@ -299,19 +302,27 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
   </div>
   <div class="info" id="modalinfo"></div>
   <div id="modalbtns">
-    <button class="btn act" onclick="setModal('ball')">是球 (1)</button>
-    <button class="btn wrong" onclick="setModal('not_ball')">不是球 (2)</button>
-    <button class="btn unk" onclick="setModal('null')">无法判定 (3)</button>
-    <span id="reasonrow" style="display:inline-block">
+    <span id="stage1">
+      <button class="btn act" onclick="setModal('ball')">是球 (1)</button>
+      <button class="btn wrong" onclick="enterReason()">不是 (2)</button>
+      <button class="btn unk" onclick="setModal('null')">无法判断 (3)</button>
+    </span>
+    <span id="stage2" style="display:none">
+      <span style="color:#ffb86c;font-size:14px;margin:0 6px">不是球，选它是什么：</span>
       <button class="btn reason" onclick="setModal('not_ball','shoe')">鞋(q)</button>
       <button class="btn reason" onclick="setModal('not_ball','sock')">袜(w)</button>
-      <button class="btn reason" onclick="setModal('not_ball','line')">线(e)</button>
+      <button class="btn reason" onclick="setModal('not_ball','line')">场地线(e)</button>
       <button class="btn reason" onclick="setModal('not_ball','light')">灯(r)</button>
       <button class="btn reason" onclick="setModal('not_ball','head')">头(t)</button>
-      <button class="btn reason" onclick="setModal('not_ball','hand')">手套(y)</button>
-      <button class="btn reason" onclick="setModal('not_ball','other')">其他(u)</button>
-      <button class="btn reason" style="background:#3d2a52;border-color:#c084fc" onclick="setModal('not_ball','penalty_spot')">点球点(p)</button>
-      <button class="btn reason" style="background:#4a3523;border-color:#fb923c" onclick="setModal('not_ball','debris')">杂物(d)</button>
+      <button class="btn reason" onclick="setModal('not_ball','hand')">手/手套(y)</button>
+      <button class="btn reason" style="background:#3d2a52;border-color:#c084fc" onclick="setModal('not_ball','penalty_spot')">点球点(u)</button>
+      <button class="btn reason" style="background:#4a3523;border-color:#fb923c" onclick="setModal('not_ball','debris')">场上杂物(i)</button>
+      <button class="btn reason" onclick="setModal('not_ball','goal')">球门/球网(o)</button>
+      <button class="btn reason" onclick="setModal('not_ball','corner_flag')">角旗(p)</button>
+      <button class="btn reason" onclick="setModal('not_ball','referee')">裁判/装备(a)</button>
+      <button class="btn reason" onclick="setModal('not_ball','other')">其他(s)</button>
+      <button class="btn" onclick="setModal('not_ball')">跳过原因 (Enter)</button>
+      <button class="btn" onclick="exitReason()">返回 (Esc)</button>
     </span>
     <button class="btn" onclick="stepLabeled(-1)">上一张已标 ([)</button>
     <button class="btn" onclick="stepLabeled(1)">下一张已标 (])</button>
@@ -324,10 +335,10 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
 <script>
 const SRC = "{{src}}";
 const COLS = 5, ROWS = 4;
-const RZ = {shoe:"鞋", sock:"袜", line:"线", light:"灯", head:"头", hand:"手套", other:"其他", penalty_spot:"点球点", debris:"杂物"};
+const RZ = {shoe:"鞋", sock:"袜", line:"场地线", light:"灯", head:"头", hand:"手/手套", penalty_spot:"点球点", debris:"场上杂物", goal:"球门/球网", corner_flag:"角旗", referee:"裁判/装备", other:"其他"};
 const CLIP = 0.25;
 let data = null, idx = 0, cur = null, orderSeq = [], sheetsSeq = [], undoStack = [], curInfo = null;
-let curT = 0, curBbox = null, seekTimer = null;
+let curT = 0, curBbox = null, stage = 1;
 
 async function jget(u){const r = await fetch(u); return r.json();}
 async function jpost(u, b){const r = await fetch(u, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(b)}); return r.json();}
@@ -467,6 +478,8 @@ function openCell(id){
   fetch("/api/crop/" + SRC + "/" + id).then(r => r.json()).then(info => {
     cur = id;
     curInfo = info;
+    stage = 1;
+    syncStage();
     document.getElementById("modalimg").src = "/crop/" + SRC + "/" + info.crop;
     const pos = orderSeq.indexOf(id);
     document.getElementById("modalinfo").innerHTML =
@@ -526,6 +539,13 @@ function applyLabel(label, reason, advance){
 function setModal(label, reason){ applyLabel(label, reason || null, true); }
 function clearLabel(){ applyLabel(null, null, false); }
 
+function enterReason(){ stage = 2; syncStage(); }
+function exitReason(){ stage = 1; syncStage(); }
+function syncStage(){
+  document.getElementById("stage1").style.display = stage === 1 ? "inline-block" : "none";
+  document.getElementById("stage2").style.display = stage === 2 ? "inline-block" : "none";
+}
+
 function undo(){
   if (!undoStack.length) return;
   const last = undoStack.pop();
@@ -573,18 +593,28 @@ document.addEventListener("keydown", (e) => {
   if (document.getElementById("modal").style.display !== "flex") return;
   if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "SELECT" || e.target.tagName === "TEXTAREA")) return;
   const k = e.key.toLowerCase();
+  if (stage === 2) {
+    if (k === "q") setModal("not_ball", "shoe");
+    else if (k === "w") setModal("not_ball", "sock");
+    else if (k === "e") setModal("not_ball", "line");
+    else if (k === "r") setModal("not_ball", "light");
+    else if (k === "t") setModal("not_ball", "head");
+    else if (k === "y") setModal("not_ball", "hand");
+    else if (k === "u") setModal("not_ball", "penalty_spot");
+    else if (k === "i") setModal("not_ball", "debris");
+    else if (k === "o") setModal("not_ball", "goal");
+    else if (k === "p") setModal("not_ball", "corner_flag");
+    else if (k === "a") setModal("not_ball", "referee");
+    else if (k === "s") setModal("not_ball", "other");
+    else if (k === "enter") setModal("not_ball");
+    else if (k === "escape") exitReason();
+    else if (k === "backspace") { e.preventDefault(); undo(); }
+    else if (k === "0") clearLabel();
+    return;
+  }
   if (k === "1") setModal("ball");
-  else if (k === "2") setModal("not_ball");
+  else if (k === "2") enterReason();
   else if (k === "3") setModal("null");
-  else if (k === "q") setModal("not_ball", "shoe");
-  else if (k === "w") setModal("not_ball", "sock");
-  else if (k === "e") setModal("not_ball", "line");
-  else if (k === "r") setModal("not_ball", "light");
-  else if (k === "t") setModal("not_ball", "head");
-  else if (k === "y") setModal("not_ball", "hand");
-  else if (k === "u") setModal("not_ball", "other");
-  else if (k === "p") setModal("not_ball", "penalty_spot");
-  else if (k === "d") setModal("not_ball", "debris");
   else if (k === "v") replay();
   else if (k === "l") { const c = document.getElementById("loopchk"); c.checked = !c.checked; }
   else if (k === "escape") closeModal();
