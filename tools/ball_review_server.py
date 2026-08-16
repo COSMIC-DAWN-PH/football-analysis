@@ -19,7 +19,7 @@ VIDEO_DIR = Path("C:/Personal Profile/Profile/Video")
 SOURCES = ["demo4", "demo1", "demo3", "demo2", "raw1", "raw2"]
 LABELS = {"ball", "not_ball", "null"}
 REASONS = ["shoe", "sock", "line", "light", "head", "hand", "penalty_spot",
-           "debris", "goal", "corner_flag", "referee", "other"]
+           "debris", "goal", "corner_flag", "referee", "player", "other"]
 
 app = Flask(__name__)
 _cache = {}
@@ -284,7 +284,7 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
   <span class="chip" style="border:2px solid #ffd75e;background:rgba(190,170,70,.22)">已标:难判</span>
   <span class="chip" style="border:1px solid #444">未标</span>
   <br>粗框=你已经标过的；未标格子为深灰细框；鼠标悬停格子可看 id+类别；审核按视频时间顺序
-  <br>两段式标注：<kbd>1</kbd>=是球 <kbd>2</kbd>=不是 → 再选原因 <kbd>q</kbd>鞋 <kbd>w</kbd>袜 <kbd>e</kbd>场地线 <kbd>r</kbd>灯 <kbd>t</kbd>头 <kbd>y</kbd>手/手套 <kbd>u</kbd>点球点 <kbd>i</kbd>场上杂物 <kbd>o</kbd>球门/球网 <kbd>p</kbd>角旗 <kbd>a</kbd>裁判/装备 <kbd>s</kbd>其他 <kbd>Enter</kbd>跳过原因 <kbd>Esc</kbd>返回 <kbd>3</kbd>=无法判断
+  <br>两段式标注：<kbd>1</kbd>=是球 <kbd>2</kbd>=不是 → 再选原因 <kbd>q</kbd>鞋 <kbd>w</kbd>袜 <kbd>e</kbd>场地线 <kbd>r</kbd>灯 <kbd>t</kbd>头 <kbd>y</kbd>手/手套 <kbd>u</kbd>点球点 <kbd>i</kbd>场上杂物 <kbd>o</kbd>球门/球网 <kbd>p</kbd>角旗 <kbd>a</kbd>裁判/装备 <kbd>d</kbd>球员/球衣 <kbd>s</kbd>其他 <kbd>Enter</kbd>跳过原因 <kbd>Esc</kbd>返回 <kbd>3</kbd>=无法判断
   <br>其他：<kbd>v</kbd>重播视频 <kbd>l</kbd>循环 <kbd>[</kbd><kbd>]</kbd>已标间切换 <kbd>g</kbd>输入id/序号跳转 <kbd>Backspace</kbd>回退上一标 <kbd>0</kbd>清除 <kbd>Esc</kbd>关闭
 </div>
 <div id="modal">
@@ -320,6 +320,7 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
       <button class="btn reason" onclick="setModal('not_ball','goal')">球门/球网(o)</button>
       <button class="btn reason" onclick="setModal('not_ball','corner_flag')">角旗(p)</button>
       <button class="btn reason" onclick="setModal('not_ball','referee')">裁判/装备(a)</button>
+      <button class="btn reason" onclick="setModal('not_ball','player')">球员/球衣(d)</button>
       <button class="btn reason" onclick="setModal('not_ball','other')">其他(s)</button>
       <button class="btn" onclick="setModal('not_ball')">跳过原因 (Enter)</button>
       <button class="btn" onclick="exitReason()">返回 (Esc)</button>
@@ -335,7 +336,7 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
 <script>
 const SRC = "{{src}}";
 const COLS = 5, ROWS = 4;
-const RZ = {shoe:"鞋", sock:"袜", line:"场地线", light:"灯", head:"头", hand:"手/手套", penalty_spot:"点球点", debris:"场上杂物", goal:"球门/球网", corner_flag:"角旗", referee:"裁判/装备", other:"其他"};
+const RZ = {shoe:"鞋", sock:"袜", line:"场地线", light:"灯", head:"头", hand:"手/手套", penalty_spot:"点球点", debris:"场上杂物", goal:"球门/球网", corner_flag:"角旗", referee:"裁判/装备", player:"球员/球衣", other:"其他"};
 const CLIP = 0.25;
 let data = null, idx = 0, cur = null, orderSeq = [], sheetsSeq = [], undoStack = [], curInfo = null;
 let curT = 0, curBbox = null, stage = 1;
@@ -605,6 +606,7 @@ document.addEventListener("keydown", (e) => {
     else if (k === "o") setModal("not_ball", "goal");
     else if (k === "p") setModal("not_ball", "corner_flag");
     else if (k === "a") setModal("not_ball", "referee");
+    else if (k === "d") setModal("not_ball", "player");
     else if (k === "s") setModal("not_ball", "other");
     else if (k === "enter") setModal("not_ball");
     else if (k === "escape") exitReason();

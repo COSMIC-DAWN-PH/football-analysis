@@ -21,7 +21,7 @@
 ### 标签取值
 
 - `ball`：确实有一颗球在图中（写在 `manual_label`）
-- `not_ball`：不是球（可在 `manual_reason` 写：`shoe` 鞋 / `sock` 袜 / `line` 场地线 / `light` 灯 / `head` 头 / `hand` 手·手套 / `penalty_spot` 点球点 / `debris` 场上杂物 / `goal` 球门·球网 / `corner_flag` 角旗 / `referee` 裁判·装备 / `other` 其他）
+- `not_ball`：不是球（可在 `manual_reason` 写：`shoe` 鞋 / `sock` 袜 / `line` 场地线 / `light` 灯 / `head` 头 / `hand` 手·手套 / `penalty_spot` 点球点 / `debris` 场上杂物 / `goal` 球门·球网 / `corner_flag` 角旗 / `referee` 裁判·装备 / `player` 球员·球衣 / `other` 其他）
 - `null`：太小/太糊无法判定（不进评估但保留）
 
 ### 网页审核工具（推荐）
@@ -29,7 +29,7 @@
 - 启动：`python tools/ball_review_server.py --port 8100`，浏览器打开 http://127.0.0.1:8100
 - 按 `review_order.txt` **视频时间顺序**导航（帧号升序）
 - 点击格子弹出双视图：**左 = 原图视频**（自动播候选帧前 0.25s→后 0.25s 半秒片段，红框定位；`v` 重播、`l` 循环、可拖动进度条看任意帧），**右 = 放大 crop**；`/video/<src>` 以 HTTP Range 流式服务本地视频，无磁盘缓存
-- **两段式标注**：第一段 `1`=是球 `2`=不是 `3`=无法判断；按 `2` 后进入第二段选原因——`q`鞋 `w`袜 `e`场地线 `r`灯 `t`头 `y`手/手套 `u`点球点 `i`场上杂物 `o`球门/球网 `p`角旗 `a`裁判/装备 `s`其他，`Enter`=跳过原因，`Esc`=返回第一段
+- **两段式标注**：第一段 `1`=是球 `2`=不是 `3`=无法判断；按 `2` 后进入第二段选原因——`q`鞋 `w`袜 `e`场地线 `r`灯 `t`头 `y`手/手套 `u`点球点 `i`场上杂物 `o`球门/球网 `p`角旗 `a`裁判/装备 `d`球员/球衣 `s`其他，`Enter`=跳过原因，`Esc`=返回第一段
 - 其他快捷键：`[`/`]`=已标间切换 `g`=输入 id 或序号跳转 `Backspace`=回退上一标 `0`=清除 `Esc`=关闭；判定后自动跳到下一个未审格子
 - 标注即时保存进 `candidates.jsonl` 的 `manual_label` / `manual_reason` 字段
 
