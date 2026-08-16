@@ -16,7 +16,7 @@ EVAL = ROOT / "eval" / "ball_crops"
 
 SOURCES = ["demo4", "demo1", "demo3", "demo2", "raw1", "raw2"]
 LABELS = {"ball", "not_ball", "null"}
-REASONS = ["shoe", "sock", "line", "light", "head", "hand", "other"]
+REASONS = ["shoe", "sock", "line", "light", "head", "hand", "other", "penalty_spot", "debris"]
 
 app = Flask(__name__)
 _cache = {}
@@ -106,9 +106,12 @@ def api_sheets(src):
     labeled = {}
     categories = {}
     ml = {}
+    reasons = {}
     for r in item["rows"]:
         if r.get("manual_label") in LABELS:
             labeled[r["id"]] = r["manual_label"]
+            if r.get("manual_reason"):
+                reasons[r["id"]] = r["manual_reason"]
         categories[r["id"]] = r["category"]
         models = _model_fields(r)
         if models:
@@ -119,6 +122,7 @@ def api_sheets(src):
     return jsonify({
         "sheets": sheets,
         "labeled": labeled,
+        "reasons": reasons,
         "categories": categories,
         "ml": ml,
         "order": order,
@@ -270,6 +274,8 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
 <div id="legend">
   <span class="chip" style="border:2px solid #6fdc8a;background:rgba(60,190,110,.28)">已标:球</span>
   <span class="chip" style="border:2px solid #ff8585;background:rgba(200,70,70,.30)">已标:非球</span>
+  <span class="chip" style="border:2px solid #c084fc;background:rgba(160,110,240,.28)">已标:点球点</span>
+  <span class="chip" style="border:2px solid #fb923c;background:rgba(240,140,70,.26)">已标:杂物</span>
   <span class="chip" style="border:2px solid #ffd75e;background:rgba(190,170,70,.22)">已标:难判</span>
   <span class="chip" style="border:2px dashed #e8b14a;background:rgba(230,170,60,.16)">双模型分歧(先审)</span>
   <span class="chip" style="border:1px solid #3fae6e;background:rgba(60,160,100,.14)">模型一致:球</span>
@@ -278,7 +284,7 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
   <span class="chip" style="border:1px solid #4a7dae;background:rgba(70,120,170,.14)">单模型预标</span>
   <span class="chip" style="border:1px solid #444">无预标</span>
   <br>粗框=你已经标过的（优先显示）；细框/虚线=还没标，按双模型预标着色；鼠标悬停格子可看 id+模型标签详情
-  <br>弹窗内 <kbd>1</kbd>=球 <kbd>2</kbd>=非球 <kbd>3</kbd>=难判 <kbd>q</kbd>鞋 <kbd>w</kbd>袜 <kbd>e</kbd>线 <kbd>r</kbd>灯 <kbd>t</kbd>头 <kbd>y</kbd>手套 <kbd>u</kbd>其他 <kbd>[</kbd><kbd>]</kbd>已标间切换 <kbd>g</kbd>输入id/序号跳转 <kbd>Backspace</kbd>回退上一标 <kbd>0</kbd>清除 <kbd>Esc</kbd>关闭
+  <br>弹窗内 <kbd>1</kbd>=球 <kbd>2</kbd>=非球 <kbd>3</kbd>=难判 <kbd>q</kbd>鞋 <kbd>w</kbd>袜 <kbd>e</kbd>线 <kbd>r</kbd>灯 <kbd>t</kbd>头 <kbd>y</kbd>手套 <kbd>u</kbd>其他 <kbd>p</kbd>点球点 <kbd>d</kbd>杂物 <kbd>[</kbd><kbd>]</kbd>已标间切换 <kbd>g</kbd>输入id/序号跳转 <kbd>Backspace</kbd>回退上一标 <kbd>0</kbd>清除 <kbd>Esc</kbd>关闭
 </div>
 <div id="modal">
   <img id="modalimg" alt="">
@@ -295,6 +301,8 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
       <button class="btn reason" onclick="setModal('not_ball','head')">头(t)</button>
       <button class="btn reason" onclick="setModal('not_ball','hand')">手套(y)</button>
       <button class="btn reason" onclick="setModal('not_ball','other')">其他(u)</button>
+      <button class="btn reason" style="background:#3d2a52;border-color:#c084fc" onclick="setModal('not_ball','penalty_spot')">点球点(p)</button>
+      <button class="btn reason" style="background:#4a3523;border-color:#fb923c" onclick="setModal('not_ball','debris')">杂物(d)</button>
     </span>
     <button class="btn" onclick="stepLabeled(-1)">上一张已标 ([)</button>
     <button class="btn" onclick="stepLabeled(1)">下一张已标 (])</button>
@@ -307,6 +315,7 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
 <script>
 const SRC = "{{src}}";
 const COLS = 5, ROWS = 4;
+const RZ = {shoe:"鞋", sock:"袜", line:"线", light:"灯", head:"头", hand:"手套", other:"其他", penalty_spot:"点球点", debris:"杂物"};
 let data = null, idx = 0, cur = null, orderSeq = [], sheetsSeq = [], undoStack = [], curInfo = null;
 
 async function jget(u){const r = await fetch(u); return r.json();}
@@ -328,7 +337,11 @@ function parseMl(id){
 function cellStyle(id){
   const man = data.labeled[id];
   if (man === "ball") return {border:"2px solid #6fdc8a", background:"rgba(60,190,110,.28)"};
-  if (man === "not_ball") return {border:"2px solid #ff8585", background:"rgba(200,70,70,.30)"};
+  if (man === "not_ball") {
+    if (data.reasons[id] === "penalty_spot") return {border:"2px solid #c084fc", background:"rgba(160,110,240,.28)"};
+    if (data.reasons[id] === "debris") return {border:"2px solid #fb923c", background:"rgba(240,140,70,.26)"};
+    return {border:"2px solid #ff8585", background:"rgba(200,70,70,.30)"};
+  }
   if (man === "null") return {border:"2px solid #ffd75e", background:"rgba(190,170,70,.22)"};
   const m = parseMl(id);
   const vals = Object.values(m);
@@ -428,7 +441,7 @@ function openCell(id){
     document.getElementById("modalinfo").innerHTML =
       "<b>" + info.id + "</b> · " + info.category + " · frame " + info.frame + " · conf " + (info.conf === null ? "-" : Number(info.conf).toFixed(2)) +
       "<br>模型: " + mtxt +
-      (info.manual ? " · 已标: " + info.manual + (info.reason ? "(" + info.reason + ")" : "") : "") +
+      (info.manual ? " · 已标: " + (info.manual === "not_ball" && info.reason ? "非球(" + (RZ[info.reason] || info.reason) + ")" : info.manual) : "") +
       " · 顺序 " + (pos + 1) + "/" + orderSeq.length;
     document.getElementById("modal").style.display = "flex";
   });
@@ -533,6 +546,8 @@ document.addEventListener("keydown", (e) => {
   else if (k === "t") setModal("not_ball", "head");
   else if (k === "y") setModal("not_ball", "hand");
   else if (k === "u") setModal("not_ball", "other");
+  else if (k === "p") setModal("not_ball", "penalty_spot");
+  else if (k === "d") setModal("not_ball", "debris");
   else if (k === "escape") closeModal();
   else if (k === "backspace") { e.preventDefault(); undo(); }
   else if (k === "0") clearLabel();
