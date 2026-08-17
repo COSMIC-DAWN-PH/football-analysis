@@ -5,16 +5,19 @@ Start:  python tools/ball_review_server.py [--port 8100]
 Open:   http://127.0.0.1:8100
 """
 import argparse
+import io
 import json
 import threading
 import time
 from pathlib import Path
 
+import cv2
 from flask import Flask, jsonify, render_template_string, request, send_file
 
 ROOT = Path(__file__).resolve().parent.parent
 EVAL = ROOT / "eval" / "ball_crops"
 VIDEO_DIR = Path("C:/Personal Profile/Profile/Video")
+TRACKS_DIR = ROOT / "output_videos"
 
 SOURCES = ["demo4", "demo1", "demo3", "demo2", "raw1", "raw2"]
 LABELS = {"ball", "not_ball", "null"}
@@ -24,6 +27,8 @@ REASONS = ["shoe", "sock", "line", "light", "head", "hand", "penalty_spot",
 app = Flask(__name__)
 _cache = {}
 _lock = threading.Lock()
+FRAME_CACHE = {}
+FOLLOW_WINDOW = 120
 
 
 def _manifest(src):
@@ -72,6 +77,155 @@ def _progress(src):
     item = _load(src)
     labeled = sum(1 for r in item["rows"] if r.get("manual_label") in LABELS)
     return {"total": len(item["rows"]), "labeled": labeled}
+
+
+def _iou(a, b):
+    x1 = max(a[0], b[0]); y1 = max(a[1], b[1])
+    x2 = min(a[2], b[2]); y2 = min(a[3], b[3])
+    inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+    area_a = max(0.0, a[2] - a[0]) * max(0.0, a[3] - a[1])
+    area_b = max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def _center(b):
+    return ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+
+
+def _tracks(src):
+    path = TRACKS_DIR / src / "ball" / "ball_tracks.jsonl"
+    if not path.is_file():
+        return None
+    with _lock:
+        item = _cache.get("tracks:" + src)
+        if item and time.time() - item["t"] < 300:
+            return item
+        frames = {}
+        f0 = t0 = f1 = t1 = None
+        for line in path.read_text(encoding="utf-8").splitlines():
+            d = json.loads(line)
+            frames[d["frame"]] = {
+                "t": d["t"],
+                "cands": d["candidates"],
+                "track": d["track"]["bbox"] if d.get("track") else None,
+            }
+            if f0 is None:
+                f0, t0 = d["frame"], d["t"]
+            elif f1 is None:
+                f1, t1 = d["frame"], d["t"]
+        fps = None
+        if f1 is not None and f1 != f0 and t1 is not None and t0 is not None:
+            fps = (f1 - f0) / max(t1 - t0, 1e-9)
+        item = {"frames": frames, "fps": fps, "t": time.time()}
+        _cache["tracks:" + src] = item
+        return item
+
+
+def _pick(frame_rec, prev, max_d):
+    if frame_rec is None:
+        return None
+    best, best_d = None, None
+    px, py = _center(prev)
+    for c in frame_rec["cands"]:
+        cb = [c[0], c[1], c[2], c[3]]
+        cx, cy = _center(cb)
+        dd = ((cx - px) ** 2 + (cy - py) ** 2) ** 0.5
+        if best_d is None or dd < best_d:
+            best, best_d = cb, dd
+    if best is None or best_d > max_d:
+        return None
+    return best
+
+
+def _follow_path(row, tracks):
+    frames = tracks["frames"]
+    f0 = row["frame"]
+    bbox = list(row["bbox"])
+    bw = bbox[2] - bbox[0]
+    bh = bbox[3] - bbox[1]
+    if bw >= 1918 or bh >= 1078:
+        return {}
+    max_d = max(3.0 * max(bw, bh), 60.0)
+    follow = {f0: bbox}
+    for direction in (-1, 1):
+        last = bbox
+        missed = 0
+        for f in range(f0 + direction, f0 + direction * (FOLLOW_WINDOW + 1), direction):
+            pick = _pick(frames.get(f), last, max_d)
+            if pick is None:
+                if missed >= 4:
+                    break
+                missed += 1
+                follow[f] = last
+                continue
+            missed = 0
+            last = pick
+            follow[f] = pick
+    return follow
+
+
+def _draw_dashed_rect(img, x1, y1, x2, y2, color, thickness=2, dash=8, gap=5):
+    x = x1
+    while x < x2:
+        nx = min(x + dash, x2)
+        cv2.line(img, (x, y1), (nx, y1), color, thickness, cv2.LINE_AA)
+        x = nx + gap
+    x = x1
+    while x < x2:
+        nx = min(x + dash, x2)
+        cv2.line(img, (x, y2), (nx, y2), color, thickness, cv2.LINE_AA)
+        x = nx + gap
+    y = y1
+    while y < y2:
+        ny = min(y + dash, y2)
+        cv2.line(img, (x1, y), (x1, ny), color, thickness, cv2.LINE_AA)
+        y = ny + gap
+    y = y1
+    while y < y2:
+        ny = min(y + dash, y2)
+        cv2.line(img, (x2, y), (x2, ny), color, thickness, cv2.LINE_AA)
+        y = ny + gap
+
+
+def _draw_frame(frame, row):
+    h, w = frame.shape[:2]
+    bbox = row["bbox"]
+    x1 = max(0, int(round(bbox[0]))); y1 = max(0, int(round(bbox[1])))
+    x2 = min(w, int(round(bbox[2]))); y2 = min(h, int(round(bbox[3])))
+    if x2 - x1 >= w - 2 or y2 - y1 >= h - 2:
+        return frame
+    m = max(24, int(max(x2 - x1, y2 - y1) * 2.5))
+    cx = (x1 + x2) // 2
+    cy = (y1 + y2) // 2
+    rx1 = max(0, cx - m); ry1 = max(0, cy - m)
+    rx2 = min(w, cx + m); ry2 = min(h, cy + m)
+    if rx2 - rx1 >= 12 and ry2 - ry1 >= 12:
+        tile = frame[ry1:ry2, rx1:rx2].copy()
+        tw0, th0 = tile.shape[1], tile.shape[0]
+        scale = 280 / max(th0, tw0)
+        if abs(scale - 1.0) > 0.02:
+            tile = cv2.resize(
+                tile, (max(1, int(tw0 * scale)), max(1, int(th0 * scale))),
+                interpolation=cv2.INTER_CUBIC,
+            )
+        th, tw = tile.shape[0], tile.shape[1]
+        ox = w - tw - 14
+        oy = 14
+        cv2.rectangle(frame, (ox - 5, oy - 5), (ox + tw + 5, oy + th + 5), (255, 255, 255), 2)
+        frame[oy:oy + th, ox:ox + tw] = tile
+        bx1 = int((x1 - rx1) * scale); by1 = int((y1 - ry1) * scale)
+        bx2 = int((x2 - rx1) * scale); by2 = int((y2 - ry1) * scale)
+        _draw_dashed_rect(frame, ox + bx1 - 1, oy + by1 - 1,
+                          ox + bx2 + 1, oy + by2 + 1, (0, 0, 255))
+        cv2.putText(frame, "zoom x%.1f" % scale, (ox, oy + th + 24),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+    pad = 1
+    _draw_dashed_rect(frame, max(0, x1 - pad), max(0, y1 - pad),
+                      min(w - 1, x2 + pad), min(h - 1, y2 + pad), (0, 0, 255))
+    cv2.putText(frame, row["id"], (max(2, x1), max(24, y1 - 10)),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 1, cv2.LINE_AA)
+    return frame
 
 
 @app.get("/")
@@ -181,6 +335,47 @@ def crop_info(src, iid):
     })
 
 
+@app.get("/api/vidinfo/<src>/<iid>")
+def vidinfo(src, iid):
+    item = _load(src)
+    row = item["by_id"].get(iid)
+    if row is None:
+        return jsonify({"error": "unknown id"}), 404
+    tracks = _tracks(src)
+    if tracks is None or not tracks["fps"]:
+        return jsonify({"fps": None, "follow": {}})
+    return jsonify({"fps": tracks["fps"], "follow": _follow_path(row, tracks)})
+
+
+@app.get("/api/frame/<src>/<iid>")
+def api_frame(src, iid):
+    key = (src, iid)
+    data = FRAME_CACHE.get(key)
+    if data is None:
+        item = _load(src)
+        row = item["by_id"].get(iid)
+        if row is None:
+            return jsonify({"error": "unknown id"}), 404
+        path = VIDEO_DIR / f"{src}.mp4"
+        if not path.is_file():
+            return jsonify({"error": "no video"}), 404
+        cap = cv2.VideoCapture(str(path))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, int(row["frame"]))
+        ok, frame = cap.read()
+        cap.release()
+        if not ok:
+            return jsonify({"error": "frame read failed"}), 502
+        ok2, buf = cv2.imencode(".jpg", _draw_frame(frame, row),
+                                [cv2.IMWRITE_JPEG_QUALITY, 92])
+        if not ok2:
+            return jsonify({"error": "encode failed"}), 502
+        data = buf.tobytes()
+        if len(FRAME_CACHE) >= 96:
+            FRAME_CACHE.clear()
+        FRAME_CACHE[key] = data
+    return send_file(io.BytesIO(data), mimetype="image/jpeg")
+
+
 @app.get("/crop/<src>/<path:filepath>")
 def serve_crop(src, filepath):
     root = EVAL / src
@@ -238,6 +433,9 @@ header a{color:#7cb7ff;text-decoration:none}
 #bboxov{position:absolute;border:2px solid #ff3b3b;box-shadow:0 0 8px rgba(255,60,60,.9);pointer-events:none;display:none;z-index:2}
 #modalimg{display:block;max-width:30vw;max-height:64vh;border:1px solid #333}
 #vidctl{margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#frameov{position:fixed;inset:0;background:rgba(0,0,0,.95);display:none;flex-direction:column;align-items:center;justify-content:center;z-index:30;overflow:auto;cursor:pointer}
+#frameov img{display:block;max-width:94vw;max-height:82vh;margin:auto;border:1px solid #555;cursor:zoom-in}
+#frameov img.zoomed{max-width:none;max-height:none;cursor:zoom-out}
 #modal .info{color:#ccc;margin:8px 0;font-size:14px;max-width:92vw;text-align:center}
 .btn{padding:8px 18px;margin:4px;border:1px solid #555;border-radius:6px;background:#2a2a2a;color:#eee;cursor:pointer;font-size:15px}
 .btn.act{background:#2d6d3f;border-color:#6fdc8a}
@@ -285,7 +483,7 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
   <span class="chip" style="border:1px solid #444">未标</span>
   <br>粗框=你已经标过的；未标格子为深灰细框；鼠标悬停格子可看 id+类别；审核按视频时间顺序
   <br>两段式标注：<kbd>1</kbd>=是球 <kbd>2</kbd>=不是 → 再选原因 <kbd>q</kbd>鞋 <kbd>w</kbd>袜 <kbd>e</kbd>场地线 <kbd>r</kbd>灯 <kbd>t</kbd>头 <kbd>y</kbd>手/手套 <kbd>u</kbd>点球点 <kbd>i</kbd>场上杂物 <kbd>o</kbd>球门/球网 <kbd>p</kbd>角旗 <kbd>a</kbd>裁判/装备 <kbd>d</kbd>球员/球衣 <kbd>s</kbd>其他 <kbd>Enter</kbd>跳过原因 <kbd>Esc</kbd>返回 <kbd>3</kbd>=无法判断
-  <br>其他：<kbd>v</kbd>重播视频 <kbd>l</kbd>循环 <kbd>[</kbd><kbd>]</kbd>已标间切换 <kbd>g</kbd>输入id/序号跳转 <kbd>Backspace</kbd>回退上一标 <kbd>0</kbd>清除 <kbd>Esc</kbd>关闭
+  <br>其他：<kbd>v</kbd>重播视频 <kbd>l</kbd>循环 <kbd>c</kbd>查看原帧（再按 <kbd>c</kbd>/<kbd>Esc</kbd>/点空白返回；点图可放大缩回） <kbd>[</kbd><kbd>]</kbd>已标间切换 <kbd>g</kbd>输入id/序号跳转 <kbd>Backspace</kbd>回退上一标 <kbd>0</kbd>清除 <kbd>Esc</kbd>关闭
 </div>
 <div id="modal">
   <div id="mrow">
@@ -297,6 +495,7 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
   </div>
   <div id="vidctl">
     <button class="btn" onclick="replay()">重播半秒 (v)</button>
+    <button class="btn" onclick="toggleFrameImg()">查看原帧 (c)</button>
     <label class="btn" style="display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="loopchk"> 循环 (l)</label>
     <span style="color:#9a9a9a;font-size:13px">拖动进度条可看任意帧</span>
   </div>
@@ -333,13 +532,17 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
     <button class="btn" onclick="closeModal()">关闭 (Esc)</button>
   </div>
 </div>
+<div id="frameov" onclick="ovBack(event)">
+  <img id="frameimg" alt="" onclick="this.classList.toggle('zoomed')">
+  <div><button class="btn">返回标注界面 (Esc / 点击空白)</button></div>
+</div>
 <script>
 const SRC = "{{src}}";
 const COLS = 5, ROWS = 4;
 const RZ = {shoe:"鞋", sock:"袜", line:"场地线", light:"灯", head:"头", hand:"手/手套", penalty_spot:"点球点", debris:"场上杂物", goal:"球门/球网", corner_flag:"角旗", referee:"裁判/装备", player:"球员/球衣", other:"其他"};
 const CLIP = 0.25;
 let data = null, idx = 0, cur = null, orderSeq = [], sheetsSeq = [], undoStack = [], curInfo = null;
-let curT = 0, curBbox = null, stage = 1;
+let curT = 0, curBbox = null, stage = 1, fps = null, followMap = null;
 
 async function jget(u){const r = await fetch(u); return r.json();}
 async function jpost(u, b){const r = await fetch(u, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(b)}); return r.json();}
@@ -432,16 +635,40 @@ function go(sheetName){
 
 function setupVideo(info){
   const vid = document.getElementById("vid");
-  const ov = document.getElementById("bboxov");
   curT = info.t;
   curBbox = info.bbox;
   const url = "/video/" + SRC;
   if (vid.getAttribute("src") !== url) {
     vid.setAttribute("src", url);
   }
+  fetch("/api/vidinfo/" + SRC + "/" + info.id)
+    .then(r => r.json())
+    .then(d => {
+      fps = d.fps || null;
+      followMap = d.fps ? (d.follow || {}) : null;
+      updateBbox();
+    })
+    .catch(() => { fps = null; followMap = null; updateBbox(); });
+  updateBbox();
+  replay();
+}
+
+function getFollowBbox(){
+  if (fps && followMap) {
+    const vid = document.getElementById("vid");
+    if (!vid || !isFinite(vid.currentTime)) return null;
+    return followMap[Math.round(vid.currentTime * fps)] || null;
+  }
   const b = curBbox;
-  const fullFrame = b && b[0] <= 0.5 && b[1] <= 0.5 && b[2] >= 1919.5 && b[3] >= 1079.5;
-  if (b && !fullFrame) {
+  if (b && !(b[0] <= 0.5 && b[1] <= 0.5 && b[2] >= 1919.5 && b[3] >= 1079.5)) return b;
+  return null;
+}
+
+function updateBbox(){
+  const ov = document.getElementById("bboxov");
+  if (!ov) return;
+  const b = getFollowBbox();
+  if (b) {
     ov.style.display = "block";
     ov.style.left = (b[0] / 1920 * 100) + "%";
     ov.style.top = (b[1] / 1080 * 100) + "%";
@@ -450,7 +677,20 @@ function setupVideo(info){
   } else {
     ov.style.display = "none";
   }
-  replay();
+}
+
+function toggleFrameImg(){
+  const f = document.getElementById("frameov");
+  if (f.style.display !== "flex") {
+    f.style.display = "flex";
+    document.getElementById("vid").pause();
+  } else {
+    f.style.display = "none";
+  }
+}
+
+function ovBack(e){
+  if (!e.target || e.target.tagName !== "IMG") toggleFrameImg();
 }
 
 function replay(){
@@ -463,6 +703,7 @@ function replay(){
     vid.play().catch(() => {});
   };
   vid.ontimeupdate = () => {
+    updateBbox();
     if (vid.currentTime >= e) {
       if (document.getElementById("loopchk").checked) { vid.currentTime = s; return; }
       vid.pause();
@@ -482,6 +723,10 @@ function openCell(id){
     stage = 1;
     syncStage();
     document.getElementById("modalimg").src = "/crop/" + SRC + "/" + info.crop;
+    const fimg = document.getElementById("frameimg");
+    fimg.src = "/api/frame/" + SRC + "/" + info.id;
+    fimg.classList.remove("zoomed");
+    document.getElementById("frameov").style.display = "none";
     const pos = orderSeq.indexOf(id);
     document.getElementById("modalinfo").innerHTML =
       "<b>" + info.id + "</b> · " + info.category + " · frame " + info.frame + " · t=" + Number(info.t).toFixed(2) + "s · conf " + (info.conf === null ? "-" : Number(info.conf).toFixed(2)) +
@@ -494,6 +739,7 @@ function openCell(id){
 
 function closeModal(){
   document.getElementById("modal").style.display = "none";
+  document.getElementById("frameov").style.display = "none";
   const vid = document.getElementById("vid");
   if (vid) vid.pause();
   cur = null;
@@ -619,7 +865,12 @@ document.addEventListener("keydown", (e) => {
   else if (k === "3") setModal("null");
   else if (k === "v") replay();
   else if (k === "l") { const c = document.getElementById("loopchk"); c.checked = !c.checked; }
-  else if (k === "escape") closeModal();
+  else if (k === "c") toggleFrameImg();
+  else if (k === "escape") {
+    const fo = document.getElementById("frameov");
+    if (fo.style.display === "flex") fo.style.display = "none";
+    else closeModal();
+  }
   else if (k === "backspace") { e.preventDefault(); undo(); }
   else if (k === "0") clearLabel();
   else if (k === "enter") { const n = nextUnlabeled(); if (n) openCell(n); }

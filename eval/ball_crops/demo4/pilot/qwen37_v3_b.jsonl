@@ -1,0 +1,10 @@
+{"id": "demo4_c00017", "label": "null", "reason": "框内白色斑块太小太糊，无法确认是否为球"}
+{"id": "demo4_c00020", "label": "null", "reason": "框内几乎无可见物体，过于模糊"}
+{"id": "demo4_b01731", "label": "null", "reason": "框内物体极小极糊，无法辨认"}
+{"id": "demo4_b01732", "label": "null", "reason": "框内几乎无可见物体，过于模糊"}
+{"id": "demo4_c00024", "label": "null", "reason": "框内有模糊白色斑块但太小太糊无法确认"}
+{"id": "demo4_b01733", "label": "null", "reason": "框内物体极小极糊，无法辨认"}
+{"id": "demo4_c00027", "label": "not_ball", "reason": "框内为建筑物/墙体结构的一部分，非球"}
+{"id": "demo4_c00030", "label": "null", "reason": "框内有模糊白色斑块但太小太糊无法确认"}
+{"id": "demo4_c00033", "label": "null", "reason": "框内有模糊白色斑块但太小太糊无法确认"}
+{"id": "demo4_b01737", "label": "not_ball", "reason": "框内物体位于建筑物边缘处，疑似杂物非球"}

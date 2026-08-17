@@ -44,3 +44,15 @@ eval/ball_crops/*/*_labels_part_*.jsonl
 eval/ball_crops/*/missing_block*.jsonl
 # Dual-model prelabel files are deprecated (manual-only workflow since 2026-08-16)
 eval/ball_crops/*/*_labels.jsonl
+
+# VLM pilot artifacts: binary media stays local, text (reports/manifests/labels) is committed
+eval/ball_crops/*/pilot/clips*/
+eval/ball_crops/*/pilot/context/
+eval/ball_crops/*/pilot/extracted*/
+eval/ball_crops/*/pilot/frames*/
+eval/ball_crops/*/pilot/strips*/
+
+# OpenCode/OpenChamber local state
+.opencode/
+.openchamber/
+*.traineddata
