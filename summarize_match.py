@@ -36,6 +36,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--fps", type=float, default=1.0)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--club1-name", default="Red",
+                        help="Club name stored in object_tracks.jsonl; maps to the red team in charts")
+    parser.add_argument("--club2-name", default="Blue",
+                        help="Club name stored in object_tracks.jsonl; maps to the blue team in charts")
     parser.add_argument("--pitch-length-m", type=float, required=True)
     parser.add_argument("--pitch-width-m", type=float, required=True)
     args = parser.parse_args(argv)
@@ -111,8 +115,9 @@ def project_players(
     objects: dict,
     homography: np.ndarray | None,
     geometry: PitchGeometry,
+    team_names: tuple[str, str] = ("Red", "Blue"),
 ) -> dict[str, list[tuple[float, float]]]:
-    result: dict[str, list[tuple[float, float]]] = {"Red": [], "Blue": []}
+    result: dict[str, list[tuple[float, float]]] = {name: [] for name in team_names}
     for object_type in ("player", "goalkeeper"):
         for item in objects.get(object_type, {}).values():
             team = item.get("club")
@@ -223,6 +228,10 @@ def fmt(value: float | None, suffix: str = "") -> str:
 def main() -> None:
     args = parse_args()
     geometry = PitchGeometry(args.pitch_length_m, args.pitch_width_m)
+    team_names = (args.club1_name, args.club2_name)
+    colors = dict(TEAM_COLORS)
+    colors.setdefault(team_names[0], "#d82f45")
+    colors.setdefault(team_names[1], "#2764c7")
     args.output_dir.mkdir(parents=True, exist_ok=True)
     objects = read_jsonl(args.tracks_dir / "object_tracks.jsonl")
     keypoints = read_jsonl(args.tracks_dir / "keypoint_tracks.jsonl")
@@ -232,7 +241,7 @@ def main() -> None:
     if calibrations:
         frame_count = min(frame_count, len(calibrations))
 
-    all_points: dict[str, list[tuple[float, float]]] = {"Red": [], "Blue": []}
+    all_points: dict[str, list[tuple[float, float]]] = {name: [] for name in team_names}
     frame_rows: list[dict] = []
     quality_rows: list[dict] = []
 
@@ -269,7 +278,7 @@ def main() -> None:
         quality_rows.append({"frame": frame_idx, **quality, "accepted": accepted_frame})
         if not accepted_frame or (not has_metric_positions and homography is None):
             continue
-        projected = project_players(frame_objects, homography, geometry)
+        projected = project_players(frame_objects, homography, geometry, team_names)
         timestamp = (
             float(calibration.get("timestamp_seconds", frame_idx / args.fps))
             if calibration is not None
@@ -277,20 +286,24 @@ def main() -> None:
         )
         row = {"frame": frame_idx, "second": timestamp}
         usable = False
-        for team in ("Red", "Blue"):
+        for team in team_names:
             all_points[team].extend(projected[team])
             metrics = per_frame_metrics(projected[team])
             if metrics is not None:
                 usable = True
                 row.update({f"{team.lower()}_{key}": value for key, value in metrics.items()})
-        if "red_centroid_x" in row and "blue_centroid_x" in row:
-            row["centroid_separation"] = abs(row["red_centroid_x"] - row["blue_centroid_x"])
+        prefix1, prefix2 = (name.lower() for name in team_names)
+        if f"{prefix1}_centroid_x" in row and f"{prefix2}_centroid_x" in row:
+            row["centroid_separation"] = abs(
+                row[f"{prefix1}_centroid_x"] - row[f"{prefix2}_centroid_x"]
+            )
         if usable:
             frame_rows.append(row)
 
     accepted = sum(row["accepted"] for row in quality_rows)
     usable_both = sum(
-        "red_centroid_x" in row and "blue_centroid_x" in row for row in frame_rows
+        f"{prefix1}_centroid_x" in row and f"{prefix2}_centroid_x" in row
+        for row in frame_rows
     )
     accepted_quality = [
         float(row["quality"])
@@ -299,7 +312,7 @@ def main() -> None:
     ]
 
     team_summary = {}
-    for team in ("Red", "Blue"):
+    for team in team_names:
         prefix = team.lower()
         team_rows = [row for row in frame_rows if f"{prefix}_centroid_x" in row]
         points = np.asarray(all_points[team], dtype=float)
@@ -347,7 +360,7 @@ def main() -> None:
             "qualified_frames": len(rows),
             "both_teams_frames": sum("centroid_separation" in row for row in rows),
         }
-        for team in ("Red", "Blue"):
+        for team in team_names:
             prefix = team.lower()
             for metric in ("visible", "centroid_x", "centroid_y", "length", "width", "compactness"):
                 values = [row[f"{prefix}_{metric}"] for row in rows if f"{prefix}_{metric}" in row]
@@ -365,7 +378,7 @@ def main() -> None:
 
     # Team heatmaps.
     fig, axes = plt.subplots(2, 1, figsize=(12, 8), constrained_layout=True)
-    for axis, team in zip(axes, ("Red", "Blue")):
+    for axis, team in zip(axes, team_names):
         heat = smooth_histogram(all_points[team], geometry)
         draw_pitch(axis, geometry)
         axis.imshow(
@@ -382,9 +395,9 @@ def main() -> None:
     # Minute-by-minute team centres.
     fig, axis = plt.subplots(figsize=(13, 5), constrained_layout=True)
     minutes = [row["minute"] for row in minute_rows]
-    for team in ("Red", "Blue"):
+    for team in team_names:
         values = [row[f"{team.lower()}_centroid_x"] for row in minute_rows]
-        axis.plot(minutes, values, marker="o", ms=3, lw=1.5, color=TEAM_COLORS[team], label=team)
+        axis.plot(minutes, values, marker="o", ms=3, lw=1.5, color=colors[team], label=team)
     axis.set_ylim(0, geometry.length_m)
     axis.set_xlabel("Match minute")
     axis.set_ylabel("Median fixed-pitch x centroid (m)")
@@ -396,12 +409,12 @@ def main() -> None:
 
     # Width and length timeline.
     fig, axes = plt.subplots(2, 1, figsize=(13, 8), sharex=True, constrained_layout=True)
-    for team in ("Red", "Blue"):
+    for team in team_names:
         prefix = team.lower()
         axes[0].plot(minutes, [row[f"{prefix}_width"] for row in minute_rows],
-                     color=TEAM_COLORS[team], label=team)
+                     color=colors[team], label=team)
         axes[1].plot(minutes, [row[f"{prefix}_length"] for row in minute_rows],
-                     color=TEAM_COLORS[team], label=team)
+                     color=colors[team], label=team)
     axes[0].set_ylabel("Team width (m)")
     axes[0].set_title("Robust team span by minute")
     axes[1].set_ylabel("Team length (m)")
@@ -441,8 +454,8 @@ def main() -> None:
     def minute_list(rows: list[dict]) -> str:
         return "、".join(f"{row['minute']:02d}:00（{row['centroid_separation']:.1f} m）" for row in rows) or "—"
 
-    red = team_summary["Red"]
-    blue = team_summary["Blue"]
+    red = team_summary[team_names[0]]
+    blue = team_summary[team_names[1]]
     report = f"""# {args.source.name} 足球视频战术分析
 
 ## 结论摘要
