@@ -83,6 +83,28 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--object-model", type=Path, default=DEFAULT_OBJECT_MODEL)
     parser.add_argument("--keypoints-model", type=Path, default=DEFAULT_KEYPOINTS_MODEL)
     parser.add_argument("--ball-model", type=Path, default=DEFAULT_BALL_MODEL)
+    parser.add_argument(
+        "--ball-player-distance-gate",
+        type=float,
+        default=None,
+        help=(
+            "Experimental ball/player distance gate; demo4 provisional value is 1.2"
+        ),
+    )
+    parser.add_argument(
+        "--ball-player-size-factor-gate",
+        type=float,
+        default=None,
+        help=(
+            "Experimental ball/player size-factor gate; demo4 provisional value is 2.2"
+        ),
+    )
+    parser.add_argument(
+        "--ball-player-gate-minimum-players",
+        type=int,
+        default=2,
+        help="Disable the experimental player gate below this visible-player count",
+    )
     parser.add_argument("--field-image", type=Path, default=DEFAULT_FIELD_IMAGE)
     parser.add_argument(
         "--pitch-length-m",
@@ -148,6 +170,18 @@ def _build_parser() -> argparse.ArgumentParser:
             "the distance to both club colors"
         ),
     )
+    parser.add_argument(
+        "--skip-goalkeeper-matching",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Ignore the goalkeeper reference colors and assign every sample by "
+            "player jersey colors. Enable when a goalkeeper jersey is similar "
+            "to the opponent's player jersey (e.g. a black goalkeeper against "
+            "a black team): otherwise dark samples get pulled to the "
+            "goalkeeper reference and the opponent's players are mislabeled"
+        ),
+    )
     return parser
 
 
@@ -169,6 +203,18 @@ def main(argv: list[str] | None = None) -> None:
         parser.error("--batch-size must be at least 1")
     if args.skip_seconds < 0:
         parser.error("--skip-seconds cannot be negative")
+    if (
+        args.ball_player_distance_gate is not None
+        and args.ball_player_distance_gate <= 0
+    ):
+        parser.error("--ball-player-distance-gate must be positive")
+    if (
+        args.ball_player_size_factor_gate is not None
+        and args.ball_player_size_factor_gate < 1
+    ):
+        parser.error("--ball-player-size-factor-gate must be at least 1")
+    if args.ball_player_gate_minimum_players < 1:
+        parser.error("--ball-player-gate-minimum-players must be at least 1")
 
     args.run_dir, args.output, args.tracks_dir = _resolve_output_layout(
         args.input,
@@ -206,7 +252,12 @@ def main(argv: list[str] | None = None) -> None:
 
     club1 = Club(args.club1_name, args.club1_player, args.club1_goalkeeper)
     club2 = Club(args.club2_name, args.club2_player, args.club2_goalkeeper)
-    club_assigner = ClubAssigner(club1, club2, referee_color=args.referee_color)
+    club_assigner = ClubAssigner(
+        club1,
+        club2,
+        referee_color=args.referee_color,
+        use_goalkeeper_colors=not args.skip_goalkeeper_matching,
+    )
     ball_player_assigner = BallToPlayerAssigner(club1, club2)
 
     try:
@@ -215,7 +266,12 @@ def main(argv: list[str] | None = None) -> None:
         parser.error(str(exc))
 
     ball_detector = BallDetector(str(args.ball_model), device=args.device)
-    ball_tracker = BallTracker(pitch_geometry)
+    ball_tracker = BallTracker(
+        pitch_geometry,
+        player_distance_gate=args.ball_player_distance_gate,
+        player_size_factor_gate=args.ball_player_size_factor_gate,
+        player_gate_minimum_players=args.ball_player_gate_minimum_players,
+    )
 
     processor = FootballVideoProcessor(
         obj_tracker,

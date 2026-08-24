@@ -46,6 +46,8 @@ class ObjectAnnotator(AbstractAnnotator):
 
                 # Annotate based on object type
                 if track == 'ball':
+                    if not item.get('track_confirmed', True):
+                        continue
                     frame = self.draw_triangle(frame, item['bbox'], self.ball_annotation_color)
                     speed_status = item.get('speed_status')
                     if speed_status == 'reliable' and 'speed' in item:

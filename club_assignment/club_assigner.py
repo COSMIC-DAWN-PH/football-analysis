@@ -9,7 +9,7 @@ from typing import Tuple, Dict, Any, Optional, List
 class ClubAssigner:
     def __init__(self, club1: Club, club2: Club, images_to_save: int = 0, images_save_path: Optional[str] = None,
                  referee_assign_dist: float = 85.0, referee_color: Optional[Tuple[int, int, int]] = None,
-                 referee_hue_tol_deg: float = 15.0) -> None:
+                 referee_hue_tol_deg: float = 15.0, use_goalkeeper_colors: bool = True) -> None:
         """
         Initializes the ClubAssigner with club information and image saving parameters.
 
@@ -22,15 +22,22 @@ class ClubAssigner:
                 reference for a sample to be assigned to that club; farther
                 samples are referee candidates.
             referee_color (Optional[Tuple[int, int, int]]): RGB reference color
-                of the referee jersey. When given, a sample whose hue is within
-                `referee_hue_tol_deg` of the referee reference hue (and closer
-                than both club hues) is a referee.
+                of the referee jersey. When given, samples closest to this
+                color are classified as referees instead of relying only on
+                the distance to both club colors.
             referee_hue_tol_deg (float): Maximum circular hue distance to the
                 referee reference hue for a referee assignment.
+            use_goalkeeper_colors (bool): When False, goalkeeper reference
+                colors are ignored and every sample is assigned by player
+                jersey colors. Enable this when a goalkeeper jersey is similar
+                to the opponent's player jersey (e.g. a black goalkeeper
+                against a black team): otherwise dark samples get pulled to
+                the goalkeeper reference and the opponent's players vanish.
         """
         self.club1 = club1
         self.club2 = club2
-        self.model = ClubAssignerModel(self.club1, self.club2, referee_assign_dist, referee_color, referee_hue_tol_deg)
+        self.model = ClubAssignerModel(self.club1, self.club2, referee_assign_dist, referee_color, referee_hue_tol_deg,
+                                       use_goalkeeper_colors=use_goalkeeper_colors)
         self.club_colors: Dict[str, Any] = {
             club1.name: club1.player_jersey_color,
             club2.name: club2.player_jersey_color
@@ -46,6 +53,7 @@ class ClubAssigner:
         self.referee_assign_dist = float(referee_assign_dist)
         self.referee_color = referee_color
         self.referee_hue_tol_deg = float(referee_hue_tol_deg)
+        self.use_goalkeeper_colors = bool(use_goalkeeper_colors)
         self.club_by_track: Dict[Tuple[str, int], str] = {}
         self.votes_by_track: Dict[Tuple[str, int], deque] = {}
         self.player_ref_hues: Dict[str, float] = {
@@ -340,7 +348,7 @@ class ClubAssigner:
         if self.model._is_referee_color(hsv, min_sat=30.0, min_val=25.0):
             return "referee"
 
-        if (
+        if self.model.use_goalkeeper_colors and (
             d_gk[gk_best] <= self.model._gk_threshold(self.model.goalkeeper_hsv[gk_best])
             and d_gk[gk_best] < d_club[club_best]
         ):
@@ -467,6 +475,11 @@ class ClubAssigner:
         if samples:
             player_items = [s for s in samples if s[1] != 'goalkeeper']
             goalkeeper_items = [s for s in samples if s[1] == 'goalkeeper']
+            if not self.use_goalkeeper_colors:
+                # Goalkeeper colors are disabled: goalkeeper-class tracks are
+                # color-assigned exactly like outfield players.
+                player_items = player_items + goalkeeper_items
+                goalkeeper_items = []
 
             frame_decisions: Dict[Tuple[str, int], str] = {}
             bright_items = [s for s in player_items if not s[3]]
@@ -535,7 +548,8 @@ class ClubAssignerModel:
                  referee_color: Optional[Tuple[int, int, int]] = None,
                  referee_hue_tol_deg: float = 15.0,
                  gk_match_dist: float = 60.0,
-                 gk_dark_match_dist: float = 40.0) -> None:
+                 gk_dark_match_dist: float = 40.0,
+                 use_goalkeeper_colors: bool = True) -> None:
         """
         Initializes the ClubAssignerModel with jersey colors for the clubs.
 
@@ -563,6 +577,7 @@ class ClubAssignerModel:
         self.referee_hue_tol_deg = float(referee_hue_tol_deg)
         self.gk_match_dist = float(gk_match_dist)
         self.gk_dark_match_dist = float(gk_dark_match_dist)
+        self.use_goalkeeper_colors = bool(use_goalkeeper_colors)
         self.referee_hsv = (
             np.array(self._rgb_to_hsv(referee_color)) if referee_color is not None else None
         )
@@ -622,7 +637,7 @@ class ClubAssignerModel:
         Returns:
             int: The index of the predicted club (0 or 1).
         """
-        if is_goalkeeper:
+        if is_goalkeeper and self.use_goalkeeper_colors:
             reference = self.goalkeeper_hsv
         else:
             reference = self.player_hsv
@@ -656,7 +671,7 @@ class ClubAssignerModel:
         """
         hsv = self._rgb_to_hsv(extracted_color)
 
-        if is_goalkeeper:
+        if is_goalkeeper and self.use_goalkeeper_colors:
             gk_distances = np.array([self._hsv_distance(hsv, r) for r in self.goalkeeper_hsv])
             best = int(np.argmin(gk_distances))
             if self._is_referee_color(hsv, min_sat=30.0, min_val=25.0):
@@ -673,14 +688,18 @@ class ClubAssignerModel:
             return None
 
         # Goalkeeper reference match: a player-class sample whose jersey
-        # matches a goalkeeper reference is that team's goalkeeper.
-        gk_distances = np.array([self._hsv_distance(hsv, r) for r in self.goalkeeper_hsv])
-        gk_best = int(np.argmin(gk_distances))
-        if (
-            float(gk_distances[gk_best]) <= self._gk_threshold(self.goalkeeper_hsv[gk_best])
-            and float(gk_distances[gk_best]) < float(club_distances[best])
-        ):
-            return gk_best
+        # matches a goalkeeper reference is that team's goalkeeper. Skipped
+        # when goalkeeper colors are disabled because a goalkeeper reference
+        # that is similar to the opponent (e.g. black on black) pulls every
+        # dark sample of that team to the wrong side.
+        if self.use_goalkeeper_colors:
+            gk_distances = np.array([self._hsv_distance(hsv, r) for r in self.goalkeeper_hsv])
+            gk_best = int(np.argmin(gk_distances))
+            if (
+                float(gk_distances[gk_best]) <= self._gk_threshold(self.goalkeeper_hsv[gk_best])
+                and float(gk_distances[gk_best]) < float(club_distances[best])
+            ):
+                return gk_best
 
         if float(club_distances[best]) > self.referee_assign_dist:
             return None

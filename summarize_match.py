@@ -36,13 +36,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--fps", type=float, default=1.0)
     parser.add_argument("--source", type=Path, required=True)
-    parser.add_argument("--club1-name", default="Red",
-                        help="Club name stored in object_tracks.jsonl; maps to the red team in charts")
-    parser.add_argument("--club2-name", default="Blue",
-                        help="Club name stored in object_tracks.jsonl; maps to the blue team in charts")
+    parser.add_argument(
+        "--club1-name",
+        default="Red",
+        help="First club name stored in object_tracks.jsonl; uses the red chart series",
+    )
+    parser.add_argument(
+        "--club2-name",
+        default="Blue",
+        help="Second club name stored in object_tracks.jsonl; uses the blue chart series",
+    )
     parser.add_argument("--pitch-length-m", type=float, required=True)
     parser.add_argument("--pitch-width-m", type=float, required=True)
     args = parser.parse_args(argv)
+    for attribute, label in (("club1_name", "--club1-name"), ("club2_name", "--club2-name")):
+        value = getattr(args, attribute).strip()
+        if not value or len(value) > 100 or any(ord(character) < 32 for character in value):
+            parser.error(f"{label} must contain 1-100 visible characters")
+        setattr(args, attribute, value)
+    if args.club1_name.casefold() == args.club2_name.casefold():
+        parser.error("--club1-name and --club2-name must be different")
     if args.output_dir is None:
         args.output_dir = default_summary_dir(args.tracks_dir)
     return args
@@ -229,9 +242,10 @@ def main() -> None:
     args = parse_args()
     geometry = PitchGeometry(args.pitch_length_m, args.pitch_width_m)
     team_names = (args.club1_name, args.club2_name)
-    colors = dict(TEAM_COLORS)
-    colors.setdefault(team_names[0], "#d82f45")
-    colors.setdefault(team_names[1], "#2764c7")
+    colors = {
+        team_names[0]: TEAM_COLORS["Red"],
+        team_names[1]: TEAM_COLORS["Blue"],
+    }
     args.output_dir.mkdir(parents=True, exist_ok=True)
     objects = read_jsonl(args.tracks_dir / "object_tracks.jsonl")
     keypoints = read_jsonl(args.tracks_dir / "keypoint_tracks.jsonl")
@@ -454,36 +468,38 @@ def main() -> None:
     def minute_list(rows: list[dict]) -> str:
         return "、".join(f"{row['minute']:02d}:00（{row['centroid_separation']:.1f} m）" for row in rows) or "—"
 
-    red = team_summary[team_names[0]]
-    blue = team_summary[team_names[1]]
+    club1 = team_summary[team_names[0]]
+    club2 = team_summary[team_names[1]]
+    club1_label = team_names[0].replace("|", "\\|")
+    club2_label = team_names[1].replace("|", "\\|")
     report = f"""# {args.source.name} 足球视频战术分析
 
 ## 结论摘要
 
 - 视频约 {duration_seconds / 60:.1f} 分钟，共分析 {frame_count:,} 个时间样本。
 - 其中 {accepted:,} 帧通过场地关键点与单应性质量门槛，占 {(accepted / frame_count * 100) if frame_count else 0.0:.1f}%；{usable_both:,} 帧同时得到两队至少 2 名场内球员的有效重心位置。
-- 质量筛选后获得红队 {red['position_samples']:,} 个、蓝队 {blue['position_samples']:,} 个场内位置样本，可用于观察大范围空间偏好；相机跟拍偏差仍然存在。
-- 在至少识别到 3 名同队球员的画面中，红队典型阵型跨度约为纵向 {fmt(red['median_length'], ' m')}、横向 {fmt(red['median_width'], ' m')}（{red['shape_frames']} 帧）；蓝队约为纵向 {fmt(blue['median_length'], ' m')}、横向 {fmt(blue['median_width'], ' m')}（{blue['shape_frames']} 帧）。
+- 质量筛选后获得 {club1_label} {club1['position_samples']:,} 个、{club2_label} {club2['position_samples']:,} 个场内位置样本，可用于观察大范围空间偏好；相机跟拍偏差仍然存在。
+- 在至少识别到 3 名同队球员的画面中，{club1_label} 典型阵型跨度约为纵向 {fmt(club1['median_length'], ' m')}、横向 {fmt(club1['median_width'], ' m')}（{club1['shape_frames']} 帧）；{club2_label} 约为纵向 {fmt(club2['median_length'], ' m')}、横向 {fmt(club2['median_width'], ' m')}（{club2['shape_frames']} 帧）。
 - 两队纵向重心分离最大的分钟：{minute_list(stretched)}；最压缩的分钟：{minute_list(compressed)}。该指标反映固定场地坐标上的队形拉开/靠拢，不代表控球或攻守优劣。
 
 ## 战术解读
 
-1. 固定场地上侧三分之一的有效位置占比：红队 {red['y_lanes'][0]*100:.1f}%，蓝队 {blue['y_lanes'][0]*100:.1f}%。这是场地空间分布，不直接表示攻守方向。
+1. 固定场地上侧三分之一的有效位置占比：{club1_label} {club1['y_lanes'][0]*100:.1f}%，{club2_label} {club2['y_lanes'][0]*100:.1f}%。这是场地空间分布，不直接表示攻守方向。
 2. 两队纵向重心分离最大的分钟：{minute_list(stretched)}；最压缩的分钟：{minute_list(compressed)}。建议回看这些时段核对阵线脱节、接应和局部压迫。
 3. 阵型宽度、长度只在同队至少 3 名球员有有效米制位置时统计；需结合原视频判读，不应单独作为战术结论。
 
 ## 团队空间统计
 
-| 指标 | 红队 | 蓝队 |
+| 指标 | {club1_label} | {club2_label} |
 |---|---:|---:|
-| 有效位置样本 | {red['position_samples']:,} | {blue['position_samples']:,} |
-| 固定场地 x 重心均值 | {fmt(red['mean_centroid_x'], ' m')} | {fmt(blue['mean_centroid_x'], ' m')} |
-| 固定场地 y 重心均值 | {fmt(red['mean_centroid_y'], ' m')} | {fmt(blue['mean_centroid_y'], ' m')} |
-| 典型纵向跨度（P90-P10） | {fmt(red['median_length'], ' m')} | {fmt(blue['median_length'], ' m')} |
-| 典型横向跨度（P90-P10） | {fmt(red['median_width'], ' m')} | {fmt(blue['median_width'], ' m')} |
-| 典型平均紧凑半径 | {fmt(red['median_compactness'], ' m')} | {fmt(blue['median_compactness'], ' m')} |
+| 有效位置样本 | {club1['position_samples']:,} | {club2['position_samples']:,} |
+| 固定场地 x 重心均值 | {fmt(club1['mean_centroid_x'], ' m')} | {fmt(club2['mean_centroid_x'], ' m')} |
+| 固定场地 y 重心均值 | {fmt(club1['mean_centroid_y'], ' m')} | {fmt(club2['mean_centroid_y'], ' m')} |
+| 典型纵向跨度（P90-P10） | {fmt(club1['median_length'], ' m')} | {fmt(club2['median_length'], ' m')} |
+| 典型横向跨度（P90-P10） | {fmt(club1['median_width'], ' m')} | {fmt(club2['median_width'], ' m')} |
+| 典型平均紧凑半径 | {fmt(club1['median_compactness'], ' m')} | {fmt(club2['median_compactness'], ' m')} |
 
-固定场地左/中/右三区位置占比：红队 {red['x_thirds'][0]*100:.1f}% / {red['x_thirds'][1]*100:.1f}% / {red['x_thirds'][2]*100:.1f}%；蓝队 {blue['x_thirds'][0]*100:.1f}% / {blue['x_thirds'][1]*100:.1f}% / {blue['x_thirds'][2]*100:.1f}%。由于未可靠识别双方逐时段进攻方向，这里只作为空间分布，不命名为进攻三区或防守三区。
+固定场地左/中/右三区位置占比：{club1_label} {club1['x_thirds'][0]*100:.1f}% / {club1['x_thirds'][1]*100:.1f}% / {club1['x_thirds'][2]*100:.1f}%；{club2_label} {club2['x_thirds'][0]*100:.1f}% / {club2['x_thirds'][1]*100:.1f}% / {club2['x_thirds'][2]*100:.1f}%。由于未可靠识别双方逐时段进攻方向，这里只作为空间分布，不命名为进攻三区或防守三区。
 
 ## 如何查看产物
 

@@ -95,6 +95,8 @@ class ProjectionAnnotator(AbstractAnnotator):
 
         if 'ball' in tracks:
             for track_id, track_info in tracks['ball'].items():
+                if not track_info.get('track_confirmed', True):
+                    continue
                 proj_pos = track_info.get('projection')
                 if proj_pos is None:
                     continue

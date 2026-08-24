@@ -15,6 +15,9 @@ gate.
 Usage:
   python tools/detect_ball_tracks.py --video raw1.mp4 --device intel:NPU
   python tools/detect_ball_tracks.py --video raw2.mp4 --device intel:GPU
+  python tools/detect_ball_tracks.py --video demo4.mp4 \
+      --object-tracks output_videos/demo4/raw/object_tracks.jsonl \
+      --player-distance-gate 1.2 --player-size-factor-gate 2.2
 """
 import argparse
 import json
@@ -51,6 +54,25 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--frame-stride", type=int, default=1,
                         help="Process every Nth frame (default 1 = full)")
     parser.add_argument("--progress-interval", type=int, default=30)
+    parser.add_argument(
+        "--object-tracks",
+        type=Path,
+        default=None,
+        help="Optional line-aligned object_tracks.jsonl used for player context",
+    )
+    parser.add_argument(
+        "--player-distance-gate",
+        type=float,
+        default=None,
+        help="Experimental max distance / max(48px, 2.5 * nearest player height)",
+    )
+    parser.add_argument(
+        "--player-size-factor-gate",
+        type=float,
+        default=None,
+        help="Experimental max symmetric factor from nearest player height / 8",
+    )
+    parser.add_argument("--gate-min-players", type=int, default=2)
     return parser
 
 
@@ -65,17 +87,40 @@ def _serialize_track(track: dict) -> dict:
     }
 
 
+def _load_object_rows(path: Path | None) -> list[dict]:
+    if path is None:
+        return []
+    if not path.is_file():
+        raise FileNotFoundError(f"Missing object tracks: {path}")
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 def main() -> None:
     args = _parser().parse_args()
     if not args.video.is_file():
         raise FileNotFoundError(f"Missing video: {args.video}")
+    if (
+        args.player_distance_gate is not None
+        or args.player_size_factor_gate is not None
+    ) and args.object_tracks is None:
+        raise ValueError("Player gates require --object-tracks")
 
     out_dir = args.out_dir or (Path("output_videos") / args.video.stem / "ball")
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "ball_tracks.jsonl"
 
     detector = BallDetector(str(args.model), confidence=args.conf, device=args.device)
-    tracker = BallTracker(PitchGeometry(105.0, 68.0))
+    tracker = BallTracker(
+        PitchGeometry(105.0, 68.0),
+        player_distance_gate=args.player_distance_gate,
+        player_size_factor_gate=args.player_size_factor_gate,
+        player_gate_minimum_players=args.gate_min_players,
+    )
+    object_rows = _load_object_rows(args.object_tracks)
     null_calibration = CalibrationResult(image_to_pitch=None)
     print(f"device resolved: {detector.device}", flush=True)
 
@@ -113,11 +158,17 @@ def main() -> None:
                 continue
             timestamp = frame_index / fps
             candidates = detector.detect([frame])[0]
+            if args.object_tracks is not None and frame_index >= len(object_rows):
+                raise ValueError(
+                    f"Object tracks end at frame {len(object_rows) - 1}; "
+                    f"video reached frame {frame_index}"
+                )
+            player_tracks = object_rows[frame_index] if object_rows else {}
             ball_tracks = tracker.update(
                 candidates,
                 timestamp,
                 null_calibration,
-                {},
+                player_tracks,
                 frame.shape,
             )
             track = ball_tracks.get(1) if ball_tracks else None

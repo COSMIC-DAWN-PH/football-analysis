@@ -1,4 +1,4 @@
-"""Evaluate ball detection/tracking against the human-reviewed label set.
+"""Evaluate ball detection/tracking against reviewed crops or frame-level GT.
 
 Reads a review manifest (candidates.jsonl with manual_label filled in) plus
 the source ball_tracks.jsonl and reports:
@@ -15,12 +15,18 @@ the source ball_tracks.jsonl and reports:
 Usage:
   python tools/eval_ball.py --manifest eval/ball_crops/demo4/candidates.jsonl \
       --tracks output_videos/demo4/ball/ball_tracks.jsonl --out eval/ball_crops/demo4/baseline.json
+  python tools/eval_ball.py --gt eval/ball_gt/demo4/frames_gt.jsonl \
+      --tracks output_videos/demo4/ball/ball_tracks.jsonl \
+      --out eval/ball_gt/demo4/baseline.json
 """
 import argparse
 import json
 import sys
 from collections import Counter, defaultdict
+from math import hypot
 from pathlib import Path
+from statistics import mean, median
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -31,6 +37,312 @@ def _load(path: Path):
 
 def _fraction(tp: int, total: int) -> float:
     return round(tp / total, 4) if total else None
+
+
+def _bbox_iou(first: list[float], second: list[float]) -> float:
+    x1 = max(float(first[0]), float(second[0]))
+    y1 = max(float(first[1]), float(second[1]))
+    x2 = min(float(first[2]), float(second[2]))
+    y2 = min(float(first[3]), float(second[3]))
+    intersection = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+    first_area = max(0.0, float(first[2]) - float(first[0])) * max(
+        0.0, float(first[3]) - float(first[1])
+    )
+    second_area = max(0.0, float(second[2]) - float(second[0])) * max(
+        0.0, float(second[3]) - float(second[1])
+    )
+    union = first_area + second_area - intersection
+    return intersection / union if union > 0 else 0.0
+
+
+def _summary(values: list[float]) -> dict[str, float | None]:
+    return {
+        "mean": round(mean(values), 4) if values else None,
+        "median": round(median(values), 4) if values else None,
+    }
+
+
+def _bbox_center(bbox: list[float]) -> tuple[float, float]:
+    return (
+        (float(bbox[0]) + float(bbox[2])) / 2,
+        (float(bbox[1]) + float(bbox[3])) / 2,
+    )
+
+
+def _center_distance(first: list[float], second: list[float]) -> float:
+    first_x, first_y = _bbox_center(first)
+    second_x, second_y = _bbox_center(second)
+    return hypot(first_x - second_x, first_y - second_y)
+
+
+def _center_group_report(
+    items: list[dict[str, Any]], details_limit: int
+) -> dict[str, Any]:
+    track_matches = [item for item in items if item["track_center_match"]]
+    observed_matches = [
+        item
+        for item in track_matches
+        if item["track"] is not None and item["track"].get("observed")
+    ]
+    confirmed_matches = [
+        item
+        for item in track_matches
+        if item["track"] is not None and item["track"].get("track_confirmed")
+    ]
+    candidate_matches = [item for item in items if item["candidate_center_match"]]
+    no_candidate = [item for item in items if not item["candidate_center_match"]]
+    tracker_selection_misses = [
+        item
+        for item in items
+        if item["candidate_center_match"] and not item["track_center_match"]
+    ]
+    wrong_track = [
+        item
+        for item in items
+        if item["track"] is not None and not item["track_center_match"]
+    ]
+    absent_track = [item for item in items if item["track"] is None]
+    matched_segments = [
+        int(item["track"]["track_segment"])
+        for item in track_matches
+        if item["track"].get("track_segment") is not None
+    ]
+    return {
+        "rule": "predicted center within the GT box (half-diagonal radius)",
+        "gt_frames": len(items),
+        "track_matched": len(track_matches),
+        "track_recall": _fraction(len(track_matches), len(items)),
+        "observed_track_matched": len(observed_matches),
+        "observed_track_recall": _fraction(len(observed_matches), len(items)),
+        "confirmed_track_matched": len(confirmed_matches),
+        "confirmed_track_recall": _fraction(len(confirmed_matches), len(items)),
+        "candidate_matched": len(candidate_matches),
+        "candidate_recall": _fraction(len(candidate_matches), len(items)),
+        "missed_no_matching_candidate": len(no_candidate),
+        "missed_tracker_selection": len(tracker_selection_misses),
+        "wrong_track_on_gt_frame": len(wrong_track),
+        "no_track_on_gt_frame": len(absent_track),
+        "matched_track_center_distance_px": _summary(
+            [item["track_center_distance"] for item in track_matches]
+        ),
+        "matched_candidate_center_distance_px": _summary(
+            [item["candidate_center_distance"] for item in candidate_matches]
+        ),
+        "matched_track_segments": len(set(matched_segments)),
+        "sample_frames": {
+            "no_matching_candidate": [
+                item["frame"] for item in no_candidate[:details_limit]
+            ],
+            "tracker_selection_miss": [
+                item["frame"] for item in tracker_selection_misses[:details_limit]
+            ],
+            "wrong_track": [item["frame"] for item in wrong_track[:details_limit]],
+        },
+    }
+
+
+def _frame_group_report(
+    items: list[dict[str, Any]], iou_threshold: float, details_limit: int
+) -> dict[str, Any]:
+    track_matches = [item for item in items if item["track_iou"] >= iou_threshold]
+    observed_matches = [
+        item
+        for item in track_matches
+        if item["track"] is not None and item["track"].get("observed")
+    ]
+    confirmed_matches = [
+        item
+        for item in track_matches
+        if item["track"] is not None and item["track"].get("track_confirmed")
+    ]
+    candidate_matches = [
+        item for item in items if item["candidate_iou"] >= iou_threshold
+    ]
+    no_candidate = [
+        item for item in items if item["candidate_iou"] < iou_threshold
+    ]
+    tracker_selection_misses = [
+        item
+        for item in items
+        if item["candidate_iou"] >= iou_threshold
+        and item["track_iou"] < iou_threshold
+    ]
+    wrong_track = [
+        item
+        for item in items
+        if item["track"] is not None and item["track_iou"] < iou_threshold
+    ]
+    absent_track = [item for item in items if item["track"] is None]
+    matched_segments = [
+        int(item["track"]["track_segment"])
+        for item in track_matches
+        if item["track"].get("track_segment") is not None
+    ]
+    return {
+        "gt_frames": len(items),
+        "track_matched": len(track_matches),
+        "track_recall": _fraction(len(track_matches), len(items)),
+        "observed_track_matched": len(observed_matches),
+        "observed_track_recall": _fraction(len(observed_matches), len(items)),
+        "confirmed_track_matched": len(confirmed_matches),
+        "confirmed_track_recall": _fraction(len(confirmed_matches), len(items)),
+        "candidate_matched": len(candidate_matches),
+        "candidate_recall": _fraction(len(candidate_matches), len(items)),
+        "missed_no_matching_candidate": len(no_candidate),
+        "missed_tracker_selection": len(tracker_selection_misses),
+        "wrong_track_on_gt_frame": len(wrong_track),
+        "no_track_on_gt_frame": len(absent_track),
+        "matched_track_iou": _summary(
+            [item["track_iou"] for item in track_matches]
+        ),
+        "matched_candidate_iou": _summary(
+            [item["candidate_iou"] for item in candidate_matches]
+        ),
+        "matched_track_segments": len(set(matched_segments)),
+        "sample_frames": {
+            "no_matching_candidate": [
+                item["frame"] for item in no_candidate[:details_limit]
+            ],
+            "tracker_selection_miss": [
+                item["frame"] for item in tracker_selection_misses[:details_limit]
+            ],
+            "wrong_track": [item["frame"] for item in wrong_track[:details_limit]],
+        },
+    }
+
+
+def _frame_gt_report(
+    gt: list[dict[str, Any]],
+    tracks: list[dict[str, Any]],
+    iou_threshold: float,
+    details_limit: int,
+) -> dict[str, Any]:
+    tracks_by_frame = {int(row["frame"]): row for row in tracks}
+    evaluated: list[dict[str, Any]] = []
+    missing_track_rows = 0
+    for gt_row in gt:
+        frame = int(gt_row["frame"])
+        track_row = tracks_by_frame.get(frame)
+        if track_row is None:
+            missing_track_rows += 1
+            track = None
+            candidates: list[list[float]] = []
+        else:
+            track = track_row.get("track")
+            candidates = track_row.get("candidates") or []
+        track_iou = (
+            _bbox_iou(gt_row["bbox"], track["bbox"])
+            if track is not None and track.get("bbox")
+            else 0.0
+        )
+        candidate_iou = max(
+            (_bbox_iou(gt_row["bbox"], candidate[:4]) for candidate in candidates),
+            default=0.0,
+        )
+        gt_width = float(gt_row["bbox"][2]) - float(gt_row["bbox"][0])
+        gt_height = float(gt_row["bbox"][3]) - float(gt_row["bbox"][1])
+        center_radius = max(4.0, hypot(gt_width, gt_height) / 2)
+        track_center_distance = (
+            _center_distance(gt_row["bbox"], track["bbox"])
+            if track is not None and track.get("bbox")
+            else None
+        )
+        candidate_center_distance = min(
+            (
+                _center_distance(gt_row["bbox"], candidate[:4])
+                for candidate in candidates
+            ),
+            default=None,
+        )
+        evaluated.append(
+            {
+                "frame": frame,
+                "interp": bool(gt_row.get("interp", False)),
+                "gt_segment": int(gt_row.get("seg", 0)),
+                "track": track,
+                "track_iou": track_iou,
+                "candidate_iou": candidate_iou,
+                "track_center_distance": track_center_distance,
+                "candidate_center_distance": candidate_center_distance,
+                "track_center_match": (
+                    track_center_distance is not None
+                    and track_center_distance <= center_radius
+                ),
+                "candidate_center_match": (
+                    candidate_center_distance is not None
+                    and candidate_center_distance <= center_radius
+                ),
+            }
+        )
+
+    keyframes = [item for item in evaluated if not item["interp"]]
+    interpolated = [item for item in evaluated if item["interp"]]
+    segment_ids = sorted({item["gt_segment"] for item in evaluated})
+    return {
+        "iou_threshold": iou_threshold,
+        "scope_note": (
+            "Recall/correctness only on frames with visible-ball GT. Precision on "
+            "unlabelled frames is intentionally not reported for partial annotation."
+        ),
+        "missing_track_file_rows": missing_track_rows,
+        "all": {
+            "iou": _frame_group_report(evaluated, iou_threshold, details_limit),
+            "center": _center_group_report(evaluated, details_limit),
+        },
+        "keyframes": {
+            "iou": _frame_group_report(keyframes, iou_threshold, details_limit),
+            "center": _center_group_report(keyframes, details_limit),
+        },
+        "interpolated": {
+            "iou": _frame_group_report(
+                interpolated, iou_threshold, details_limit
+            ),
+            "center": _center_group_report(interpolated, details_limit),
+        },
+        "segments": {
+            str(segment): {
+                "all": {
+                    "iou": _frame_group_report(
+                        [
+                            item
+                            for item in evaluated
+                            if item["gt_segment"] == segment
+                        ],
+                        iou_threshold,
+                        details_limit,
+                    ),
+                    "center": _center_group_report(
+                        [
+                            item
+                            for item in evaluated
+                            if item["gt_segment"] == segment
+                        ],
+                        details_limit,
+                    ),
+                },
+                "keyframes": {
+                    "iou": _frame_group_report(
+                        [
+                            item
+                            for item in keyframes
+                            if item["gt_segment"] == segment
+                        ],
+                        iou_threshold,
+                        details_limit,
+                    ),
+                    "center": _center_group_report(
+                        [
+                            item
+                            for item in keyframes
+                            if item["gt_segment"] == segment
+                        ],
+                        details_limit,
+                    ),
+                },
+            }
+            for segment in segment_ids
+        },
+    }
 
 
 def _report(manifest: list[dict], tracks: list[dict]) -> dict:
@@ -139,16 +451,30 @@ def _report(manifest: list[dict], tracks: list[dict]) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--manifest", type=Path, default=None)
+    parser.add_argument("--gt", type=Path, default=None)
     parser.add_argument("--tracks", type=Path, required=True)
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--iou", type=float, default=0.3)
+    parser.add_argument("--details-limit", type=int, default=50)
     args = parser.parse_args()
-    if not args.manifest.is_file():
+    if args.manifest is None and args.gt is None:
+        parser.error("at least one of --manifest or --gt is required")
+    if args.manifest is not None and not args.manifest.is_file():
         raise FileNotFoundError(f"Missing manifest: {args.manifest}")
+    if args.gt is not None and not args.gt.is_file():
+        raise FileNotFoundError(f"Missing frame GT: {args.gt}")
     if not args.tracks.is_file():
         raise FileNotFoundError(f"Missing tracks: {args.tracks}")
 
-    report = _report(_load(args.manifest), _load(args.tracks))
+    tracks = _load(args.tracks)
+    report: dict[str, Any] = {}
+    if args.manifest is not None:
+        report.update(_report(_load(args.manifest), tracks))
+    if args.gt is not None:
+        report["frame_gt"] = _frame_gt_report(
+            _load(args.gt), tracks, args.iou, args.details_limit
+        )
     text = json.dumps(report, ensure_ascii=False, indent=2)
     print(text)
     if args.out:

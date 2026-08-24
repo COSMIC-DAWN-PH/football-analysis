@@ -436,10 +436,16 @@ class Repository:
     def _integer(value: Any, label: str, minimum: int) -> int:
         if isinstance(value, bool):
             raise ApiProblem(f"{label} 必须是整数")
-        try:
+        if isinstance(value, int):
+            result = value
+        elif isinstance(value, float):
+            if not math.isfinite(value) or not value.is_integer():
+                raise ApiProblem(f"{label} 必须是整数")
             result = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ApiProblem(f"{label} 必须是整数") from exc
+        elif isinstance(value, str) and re.fullmatch(r"[+-]?\d+", value.strip()):
+            result = int(value)
+        else:
+            raise ApiProblem(f"{label} 必须是整数")
         if result < minimum:
             raise ApiProblem(f"{label} 不能小于 {minimum}")
         return result
@@ -464,6 +470,14 @@ class Repository:
         if not value or len(value) > 100 or any(ord(char) < 32 for char in value):
             raise ApiProblem(f"{label} 必须是 1–100 个可显示字符")
         return value
+
+    @classmethod
+    def _team_names(cls, options: dict[str, Any]) -> tuple[str, str]:
+        club1_name = cls._text(options.get("club1_name", "Red"), "第一队名称")
+        club2_name = cls._text(options.get("club2_name", "Blue"), "第二队名称")
+        if club1_name.casefold() == club2_name.casefold():
+            raise ApiProblem("两队名称必须不同")
+        return club1_name, club2_name
 
     @staticmethod
     def _rgb(value: Any, label: str) -> tuple[int, int, int]:
@@ -543,8 +557,8 @@ class Repository:
             estimate_speed = self._bool(options.get("estimate_speed"), False)
             annotate_possession = self._bool(options.get("annotate_possession"), False)
             preview = self._bool(options.get("preview"), False)
-            club1_name = self._text(options.get("club1_name", "Red"), "第一队名称")
-            club2_name = self._text(options.get("club2_name", "Blue"), "第二队名称")
+            device = self._text(options.get("device", "auto"), "推理设备")
+            club1_name, club2_name = self._team_names(options)
             club1_player = self._rgb(options.get("club1_player", [232, 247, 248]), "第一队球员颜色")
             club1_goalkeeper = self._rgb(
                 options.get("club1_goalkeeper", [6, 25, 21]), "第一队门将颜色"
@@ -552,6 +566,33 @@ class Repository:
             club2_player = self._rgb(options.get("club2_player", [172, 251, 145]), "第二队球员颜色")
             club2_goalkeeper = self._rgb(
                 options.get("club2_goalkeeper", [239, 156, 132]), "第二队门将颜色"
+            )
+            skip_goalkeeper_matching = self._bool(options.get("skip_goalkeeper_matching"), False)
+            referee_value = options.get("referee_color")
+            referee_color = (
+                None if referee_value is None else self._rgb(referee_value, "裁判球衣颜色")
+            )
+            distance_gate_value = options.get("ball_player_distance_gate")
+            ball_player_distance_gate = (
+                None
+                if distance_gate_value is None
+                else self._positive_float(distance_gate_value, "足球与球员距离门槛")
+            )
+            size_gate_value = options.get("ball_player_size_factor_gate")
+            ball_player_size_factor_gate = (
+                None
+                if size_gate_value is None
+                else self._positive_float(size_gate_value, "足球与球员尺寸门槛")
+            )
+            if (
+                ball_player_size_factor_gate is not None
+                and ball_player_size_factor_gate < 1
+            ):
+                raise ApiProblem("足球与球员尺寸门槛不能小于 1")
+            ball_player_gate_minimum_players = self._integer(
+                options.get("ball_player_gate_minimum_players", 2),
+                "门控最少可见球员数",
+                1,
             )
 
             expected = [
@@ -588,6 +629,8 @@ class Repository:
                 rel(tracks_dir),
                 "--batch-size",
                 str(batch_size),
+                "--device",
+                device,
                 "--skip-seconds",
                 str(skip_seconds),
                 "--estimate-speed" if estimate_speed else "--no-estimate-speed",
@@ -605,7 +648,27 @@ class Repository:
                 ",".join(map(str, club2_player)),
                 "--club2-goalkeeper",
                 ",".join(map(str, club2_goalkeeper)),
+                (
+                    "--skip-goalkeeper-matching"
+                    if skip_goalkeeper_matching
+                    else "--no-skip-goalkeeper-matching"
+                ),
+                "--ball-player-gate-minimum-players",
+                str(ball_player_gate_minimum_players),
             ]
+            if referee_color is not None:
+                command.extend(("--referee-color", ",".join(map(str, referee_color))))
+            if ball_player_distance_gate is not None:
+                command.extend(
+                    ("--ball-player-distance-gate", str(ball_player_distance_gate))
+                )
+            if ball_player_size_factor_gate is not None:
+                command.extend(
+                    (
+                        "--ball-player-size-factor-gate",
+                        str(ball_player_size_factor_gate),
+                    )
+                )
             metadata = self._video_metadata(input_path)
             total_frames = metadata.get("frames")
             fps = metadata.get("fps")
@@ -624,6 +687,7 @@ class Repository:
                 "pitch_width_m": pitch_width_m,
                 "tracks_dir": rel(tracks_dir),
                 "batch_size": batch_size,
+                "device": device,
                 "skip_seconds": skip_seconds,
                 "estimate_speed": estimate_speed,
                 "annotate_possession": annotate_possession,
@@ -634,6 +698,11 @@ class Repository:
                 "club2_name": club2_name,
                 "club2_player": list(club2_player),
                 "club2_goalkeeper": list(club2_goalkeeper),
+                "skip_goalkeeper_matching": skip_goalkeeper_matching,
+                "referee_color": list(referee_color) if referee_color is not None else None,
+                "ball_player_distance_gate": ball_player_distance_gate,
+                "ball_player_size_factor_gate": ball_player_size_factor_gate,
+                "ball_player_gate_minimum_players": ball_player_gate_minimum_players,
                 "source_fps": fps,
             }
             return JobSpec(
@@ -665,6 +734,7 @@ class Repository:
                 raise ApiProblem("球场长度必须大于 33 米，以容纳标准禁区")
             if pitch_width_m < 40.32:
                 raise ApiProblem("球场宽度不能小于 40.32 米，以容纳标准禁区")
+            club1_name, club2_name = self._team_names(options)
             expected = [output_dir / filename for filename in SUMMARY_FILENAMES]
             self._collision_check(expected, overwrite)
             normalized_options = {
@@ -674,6 +744,8 @@ class Repository:
                 "fps": fps,
                 "pitch_length_m": pitch_length_m,
                 "pitch_width_m": pitch_width_m,
+                "club1_name": club1_name,
+                "club2_name": club2_name,
             }
             command = [
                 sys.executable,
@@ -690,6 +762,10 @@ class Repository:
                 str(pitch_length_m),
                 "--pitch-width-m",
                 str(pitch_width_m),
+                "--club1-name",
+                club1_name,
+                "--club2-name",
+                club2_name,
             ]
             return JobSpec("summary", command, normalized_options, expected)
 

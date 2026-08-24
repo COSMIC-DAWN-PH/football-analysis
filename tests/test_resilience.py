@@ -90,6 +90,42 @@ class ResilienceTests(unittest.TestCase):
         labels = [call.args[1] for call in put_text.call_args_list]
         self.assertIn("Ball speed: pending", labels)
 
+    def test_unconfirmed_ball_is_not_drawn(self) -> None:
+        annotator = ObjectAnnotator()
+        frame = np.zeros((240, 320, 3), dtype=np.uint8)
+        tracks = {
+            "ball": {
+                1: {
+                    "bbox": [100, 100, 108, 108],
+                    "track_confirmed": False,
+                }
+            },
+            "goalkeeper": {},
+            "player": {},
+            "referee": {},
+        }
+        with patch.object(annotator, "draw_triangle") as draw_triangle:
+            annotator.annotate(frame, tracks)
+        draw_triangle.assert_not_called()
+
+    def test_unconfirmed_ball_is_not_projected(self) -> None:
+        annotator = ProjectionAnnotator()
+        field = np.zeros((352, 528, 3), dtype=np.uint8)
+        tracks = {
+            "ball": {
+                1: {
+                    "projection": (100.0, 100.0),
+                    "track_confirmed": False,
+                }
+            },
+            "goalkeeper": {},
+            "player": {},
+            "referee": {},
+        }
+        with patch.object(annotator, "_draw_outline") as draw_outline:
+            annotator.annotate(field, tracks)
+        draw_outline.assert_not_called()
+
     def test_unconfirmed_possession_is_explicitly_labeled(self) -> None:
         processor = FootballVideoProcessor.__new__(FootballVideoProcessor)
         processor.ball_to_player_assigner = SimpleNamespace(

@@ -6,8 +6,11 @@ Open:   http://127.0.0.1:8101/annotate/demo4
 """
 import argparse
 import json
+import math
+import shutil
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template_string, request, send_file
@@ -23,6 +26,7 @@ FPS = 29.97
 app = Flask(__name__)
 _cache = {}
 _lock = threading.Lock()
+_write_lock = threading.Lock()
 
 
 def _load_annotations(src):
@@ -35,14 +39,93 @@ def _load_annotations(src):
     return rows
 
 
+def _validate_annotations(entries):
+    rows = {}
+    for index, entry in enumerate(entries):
+        try:
+            frame = int(entry["frame"])
+            bbox = [float(value) for value in entry["bbox"]]
+            segment = int(entry.get("seg", 0))
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"annotation {index} has invalid fields") from error
+        if frame < 0:
+            raise ValueError(f"annotation {index} has a negative frame")
+        if frame in rows:
+            raise ValueError(f"duplicate annotation frame {frame}")
+        if len(bbox) != 4 or not all(math.isfinite(value) for value in bbox):
+            raise ValueError(f"annotation {index} has an invalid bbox")
+        x1, y1, x2, y2 = bbox
+        if not (0 <= x1 < x2 <= 1920 and 0 <= y1 < y2 <= 1080):
+            raise ValueError(f"annotation {index} bbox is outside 1920x1080")
+        if segment < 0:
+            raise ValueError(f"annotation {index} has a negative segment")
+        rows[frame] = {
+            "frame": frame,
+            "t": round(frame / FPS, 4),
+            "bbox": bbox,
+            "seg": segment,
+        }
+    return rows
+
+
+def _atomic_write(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(payload, encoding="utf-8")
+    temporary.replace(path)
+
+
 def _save_annotations(src, rows):
     path = GT_DIR / src / "annotations.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = "\n".join(
         json.dumps(rows[f], ensure_ascii=False, separators=(",", ":"))
         for f in sorted(rows)
     ) + "\n"
-    path.write_text(payload, encoding="utf-8")
+    with _write_lock:
+        if path.is_file():
+            current = path.read_text(encoding="utf-8")
+            if current == payload:
+                return False
+            shutil.copy2(path, path.with_name(path.name + ".bak"))
+        _atomic_write(path, payload)
+    return True
+
+
+def _load_progress(src):
+    path = GT_DIR / src / "progress.json"
+    if not path.is_file():
+        return {"reviewed_through_frame": None}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        frame = data.get("reviewed_through_frame")
+        return {"reviewed_through_frame": int(frame) if frame is not None else None}
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return {"reviewed_through_frame": None}
+
+
+def _save_progress(src, frame):
+    payload = json.dumps(
+        {
+            "source": src,
+            "reviewed_through_frame": int(frame),
+            "updated_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+        },
+        ensure_ascii=False,
+        indent=2,
+    ) + "\n"
+    with _write_lock:
+        _atomic_write(GT_DIR / src / "progress.json", payload)
+
+
+def _snapshot_annotations(src):
+    source = GT_DIR / src / "annotations.jsonl"
+    if not source.is_file():
+        raise FileNotFoundError(source)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    destination = GT_DIR / src / "backups" / f"annotations.{stamp}.jsonl"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    return destination
 
 
 def _tracks_index(src):
@@ -84,32 +167,75 @@ def video(src):
 
 @app.get("/annotate/<src>")
 def annotate(src):
+    if src not in SOURCES:
+        return jsonify({"error": "bad src"}), 404
     return render_template_string(PAGE_HTML, src=src)
 
 
 @app.get("/api/gt/<src>")
 def api_gt(src):
-    return jsonify({"annotations": sorted(_load_annotations(src).values(), key=lambda a: a["frame"])})
+    if src not in SOURCES:
+        return jsonify({"error": "bad src"}), 404
+    progress = _load_progress(src)
+    return jsonify(
+        {
+            "annotations": sorted(
+                _load_annotations(src).values(), key=lambda a: a["frame"]
+            ),
+            **progress,
+        }
+    )
 
 
 @app.post("/api/gt/save/<src>")
 def api_gt_save(src):
-    body = request.get_json(force=True)
-    rows = {}
-    for entry in body.get("annotations", []):
-        frame = int(entry["frame"])
-        rows[frame] = {
-            "frame": frame,
-            "t": round(frame / FPS, 4),
-            "bbox": [float(v) for v in entry["bbox"]],
-            "seg": int(entry.get("seg", 0)),
-        }
-    _save_annotations(src, rows)
-    return jsonify({"count": len(rows)})
+    if src not in SOURCES:
+        return jsonify({"error": "bad src"}), 404
+    body = request.get_json(force=True) or {}
+    try:
+        rows = _validate_annotations(body.get("annotations", []))
+        changed = _save_annotations(src, rows)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    return jsonify({"count": len(rows), "changed": changed})
+
+
+@app.post("/api/gt/progress/<src>")
+def api_gt_progress(src):
+    if src not in SOURCES:
+        return jsonify({"error": "bad src"}), 404
+    body = request.get_json(force=True) or {}
+    try:
+        frame = int(body["reviewed_through_frame"])
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "invalid reviewed_through_frame"}), 400
+    if frame < 0:
+        return jsonify({"error": "reviewed_through_frame cannot be negative"}), 400
+    current = _load_progress(src).get("reviewed_through_frame")
+    stored_frame = max(frame, current) if current is not None else frame
+    _save_progress(src, stored_frame)
+    return jsonify({"reviewed_through_frame": stored_frame})
+
+
+@app.post("/api/gt/snapshot/<src>")
+def api_gt_snapshot(src):
+    if src not in SOURCES:
+        return jsonify({"error": "bad src"}), 404
+    try:
+        destination = _snapshot_annotations(src)
+    except FileNotFoundError:
+        return jsonify({"error": "no annotations to snapshot"}), 404
+    try:
+        display_path = destination.relative_to(ROOT)
+    except ValueError:
+        display_path = destination
+    return jsonify({"path": str(display_path)})
 
 
 @app.get("/api/hint/<src>/<int:frame>")
 def api_hint(src, frame):
+    if src not in SOURCES:
+        return jsonify({"error": "bad src"}), 404
     idx = _tracks_index(src)["idx"]
     return jsonify({"bbox": idx.get(frame)})
 
@@ -117,7 +243,7 @@ def api_hint(src, frame):
 INDEX_HTML = """
 <!doctype html>
 <html lang="zh">
-<head><meta charset="utf-8"><title>视频球标注</title>
+<head><meta charset="utf-8"><link rel="icon" href="data:,"><title>视频球标注</title>
 <style>
 body{font-family:system-ui,sans-serif;margin:24px;background:#111;color:#eee}
 a{color:#7cb7ff;text-decoration:none}
@@ -139,7 +265,7 @@ td,th{border:1px solid #333;padding:8px 14px;text-align:left}
 PAGE_HTML = """
 <!doctype html>
 <html lang="zh">
-<head><meta charset="utf-8"><title>标注 {{src}}</title>
+<head><meta charset="utf-8"><link rel="icon" href="data:,"><title>标注 {{src}}</title>
 <style>
 body{font-family:system-ui,sans-serif;margin:0;background:#111;color:#eee}
 header{position:sticky;top:0;background:#1c1c1c;padding:8px 14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #333;z-index:10}
@@ -157,6 +283,10 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
 #marks{display:flex;flex-wrap:wrap;gap:4px;max-width:96vw;margin:8px auto 4px}
 .mark{font-size:11px;padding:1px 6px;border-radius:8px;background:#2d4a2d;color:#9fdf9f;cursor:pointer}
 .mark.cur{background:#7a5a1a;color:#ffd75e}
+.mark.gap{outline:2px solid #ff9f43;color:#ffe0b2}
+#segments{display:flex;flex-wrap:wrap;gap:6px;max-width:96vw;margin:8px auto 2px}
+.segment{font-size:12px;padding:3px 9px;border-radius:6px;color:#fff;cursor:pointer}
+#saveState{font-size:12px;color:#8bd49c}
 #legend{font-size:13px;color:#b9b9b9;margin:6px auto 12px;text-align:center;line-height:2}
 .chip{display:inline-block;padding:1px 10px;margin:0 4px;border-radius:4px;background:#1c1c1c;white-space:nowrap}
 </style></head>
@@ -166,6 +296,11 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
   <b>{{src}}</b>
   <span id="stats">-</span>
   <button class="btn" onclick="saveNow()">保存 (Ctrl+S)</button>
+  <button class="btn" onclick="markReviewed()">标记检查到当前帧 (R)</button>
+  <button class="btn" onclick="jumpKeyframe(-1)">上一关键帧 (J)</button>
+  <button class="btn" onclick="jumpKeyframe(1)">下一关键帧 (K)</button>
+  <button class="btn" onclick="snapshotNow()">创建 GT 快照</button>
+  <span id="saveState"></span>
   <span id="zind">缩放:关（z 开启）</span>
   <button class="btn" onclick="zoomStep(1.3)">放大+</button>
   <button class="btn" onclick="zoomStep(1/1.3)">缩小-</button>
@@ -180,13 +315,15 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
     <div id="zbadge"></div>
   </div>
   <div id="info">
-    <kbd>空格</kbd>播放/暂停 <kbd>←</kbd><kbd>→</kbd>单帧(±1) <kbd>Shift</kbd>+<kbd>←→</kbd>±10帧
+    <kbd>空格</kbd>播放/暂停 <kbd>A</kbd><kbd>D</kbd>单帧(±1) <kbd>Shift</kbd>+<kbd>A</kbd><kbd>D</kbd>±10帧
     <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd>倍速0.5/1/2× <kbd>Del</kbd>删当前框
     <kbd>Backspace</kbd>撤销 <kbd>h</kbd>检测器提示 <kbd>[</kbd><kbd>]</kbd>框大小
+    <kbd>J</kbd><kbd>K</kbd>上/下关键帧 <kbd>R</kbd>标记已检查进度
     <kbd>z</kbd>缩放模式（滚轮缩放·左键画框·右键拖动平移；再按 z 退出）
     <br>画框：左键点击=固定大小框（居中），左键拖拽=任意矩形；左键拖动框体移动、拖角缩放；右键按住拖动=平移画面
     <br>实线绿框=你打的关键帧；虚线绿框=两关键帧之间自动插值的中间帧（随播放实时显示，导出时写入GT）
   </div>
+  <div id="segments"></div>
   <div id="marks"></div>
   <div id="legend">
     <span class="chip" style="border:2px solid #3fdc6a;background:rgba(63,220,106,.15)">实线绿框 = 你标注的关键帧</span>
@@ -198,7 +335,7 @@ kbd{background:#2a2a2a;border:1px solid #555;border-radius:4px;padding:1px 6px;f
 </div>
 <script>
 const SRC = "{{src}}";
-const NAT_W = 1920, NAT_H = 1080;
+const NAT_W = 1920, NAT_H = 1080, FPS = 29.97, MAX_INTERP_GAP = 60;
 const vid = document.getElementById("vid");
 const cv = document.getElementById("cv");
 const ctx = cv.getContext("2d");
@@ -209,6 +346,7 @@ let hintOn = true;
 let draft = null;        // {x1,y1,x2,y2, mode:'new'|'move'|'resize'|'pan', ...}
 let editBox = null;      // box being edited on current frame (exists in ann)
 let zoom = 1, panX = 0, panY = 0, zoomMode = false;
+let reviewedThrough = null;
 
 vid.src = "/video/" + SRC;
 vid.addEventListener("timeupdate", draw);
@@ -299,7 +437,7 @@ function draw(){
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, cv.width, cv.height);
   ctx.lineWidth = 1.5;
-  const f = Math.round(vid.currentTime * 29.97);
+  const f = Math.round(vid.currentTime * FPS);
   if (!draft){
     const a = ann[f];
     if (a){
@@ -336,13 +474,27 @@ function draw(){
   }
 }
 
-function currentFrame(){ return Math.round(vid.currentTime * 29.97); }
+function currentFrame(){ return Math.round(vid.currentTime * FPS); }
+
+function totalFrames(){
+  return Number.isFinite(vid.duration) ? Math.max(0, Math.round(vid.duration * FPS)) : 0;
+}
+
+function jumpKeyframe(direction){
+  const keys = Object.keys(ann).map(Number).sort((a,b)=>a-b);
+  const f = currentFrame();
+  const target = direction < 0
+    ? [...keys].reverse().find(k => k < f)
+    : keys.find(k => k > f);
+  if (target === undefined) return;
+  vid.currentTime = target / FPS;
+  refreshStats(); draw();
+}
 
 function addKeyframe(f, bbox){
   let seg = null;
-  for (const k in ann){
-    if (Math.abs(parseInt(k) - f) <= 120){ seg = ann[k].seg; break; }
-  }
+  const nearest = Object.keys(ann).map(Number).sort((a,b)=>Math.abs(a-f)-Math.abs(b-f))[0];
+  if (nearest !== undefined && Math.abs(nearest - f) <= 120) seg = ann[nearest].seg;
   if (seg === null){ seg = segCounter++; }
   ann[f] = {bbox, seg};
   saveNow();
@@ -370,25 +522,146 @@ function saveNow(){
     const f = parseInt(k);
     return {frame: f, bbox: ann[f].bbox, seg: ann[f].seg};
   });
-  fetch("/api/gt/save/" + SRC, {
+  document.getElementById("saveState").textContent = "保存中…";
+  return fetch("/api/gt/save/" + SRC, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({annotations: payload}),
-  }).then(()=>{ document.getElementById("stats").textContent = "已存 " + payload.length + " 关键帧"; });
+  }).then(async response => {
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "保存失败");
+    document.getElementById("saveState").textContent = data.changed ? "已保存（旧版在 .bak）" : "内容未变化";
+    refreshStats();
+    return data;
+  }).catch(error => {
+    document.getElementById("saveState").textContent = "保存失败：" + error.message;
+    throw error;
+  });
+}
+
+function markReviewed(){
+  const frame = currentFrame();
+  fetch("/api/gt/progress/" + SRC, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({reviewed_through_frame: frame}),
+  }).then(async response => {
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "进度保存失败");
+    reviewedThrough = data.reviewed_through_frame;
+    document.getElementById("saveState").textContent = "检查进度已保存到 frame " + reviewedThrough;
+    refreshStats();
+  }).catch(error => { document.getElementById("saveState").textContent = error.message; });
+}
+
+function snapshotNow(){
+  fetch("/api/gt/snapshot/" + SRC, {method: "POST"}).then(async response => {
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || "快照失败");
+    document.getElementById("saveState").textContent = "快照：" + data.path;
+  }).catch(error => { document.getElementById("saveState").textContent = error.message; });
+}
+
+function segmentTopology(keys){
+  const intervals = new Map();
+  for (const frame of keys){
+    const segment = ann[frame].seg;
+    if (!intervals.has(segment)) intervals.set(segment, [frame, frame]);
+    else {
+      const interval = intervals.get(segment);
+      interval[0] = Math.min(interval[0], frame);
+      interval[1] = Math.max(interval[1], frame);
+    }
+  }
+  const segments = [...intervals.keys()];
+  const parent = new Map(segments.map(segment => [segment, segment]));
+  const find = segment => {
+    let root = segment;
+    while (parent.get(root) !== root) root = parent.get(root);
+    while (parent.get(segment) !== segment){
+      const next = parent.get(segment); parent.set(segment, root); segment = next;
+    }
+    return root;
+  };
+  const union = (first, second) => {
+    const a = find(first), b = find(second);
+    if (a !== b) parent.set(b, a);
+  };
+  for (let i = 0; i < segments.length; i++){
+    for (let j = i + 1; j < segments.length; j++){
+      const a = intervals.get(segments[i]), b = intervals.get(segments[j]);
+      if (Math.max(a[0], b[0]) <= Math.min(a[1], b[1])) union(segments[i], segments[j]);
+    }
+  }
+  const rawGroups = new Map();
+  for (const segment of segments){
+    const root = find(segment);
+    if (!rawGroups.has(root)) rawGroups.set(root, []);
+    rawGroups.get(root).push(segment);
+  }
+  const groups = [...rawGroups.values()].sort((a,b) =>
+    Math.min(...a.map(segment=>intervals.get(segment)[0])) -
+    Math.min(...b.map(segment=>intervals.get(segment)[0]))
+  );
+  const normalized = new Map();
+  groups.forEach((group, index) => group.forEach(segment => normalized.set(segment, index)));
+  return {groups, normalized};
 }
 
 function refreshStats(){
   const keys = Object.keys(ann).map(Number).sort((a,b)=>a-b);
-  const segs = new Set(keys.map(k=>ann[k].seg)).size;
+  const topology = segmentTopology(keys);
+  const bySegment = new Map(topology.groups.map((_group,index)=>[index, []]));
+  for (const frame of keys) bySegment.get(topology.normalized.get(ann[frame].seg)).push(frame);
+  const gaps = [];
+  const covered = new Set(keys);
+  for (const [segment, frames] of bySegment){
+    frames.sort((a,b)=>a-b);
+    for (let index = 1; index < frames.length; index++){
+      const previous = frames[index - 1], frame = frames[index], gap = frame - previous;
+      if (gap <= MAX_INTERP_GAP){
+        for (let value = previous + 1; value < frame; value++) covered.add(value);
+      } else gaps.push([previous, frame, segment]);
+    }
+  }
+  const mergedRawSegments = topology.groups.filter(group=>group.length>1).length;
+  const total = totalFrames();
+  const inferredProgress = keys.length ? keys[keys.length - 1] : -1;
+  const progress = reviewedThrough === null ? inferredProgress : reviewedThrough;
+  const progressLabel = reviewedThrough === null ? "推测已到" : "已检查到";
+  const pct = total > 0 && progress >= 0 ? (100 * (progress + 1) / total).toFixed(1) : "0.0";
   document.getElementById("stats").textContent =
-    "关键帧 " + keys.length + " · 段 " + segs + " · 当前帧 " + currentFrame();
+    "关键帧 " + keys.length + " · 规范段 " + bySegment.size + " · GT覆盖 " + covered.size + "帧" +
+    " · " + progressLabel + " " + progress + "/" + Math.max(0,total-1) + " (" + pct + "%)" +
+    " · >2s长间隔 " + gaps.length + (mergedRawSegments ? " · 原段交叠组 " + mergedRawSegments : "") + " · 当前 " + currentFrame();
+  const segmentWrap = document.getElementById("segments");
+  segmentWrap.innerHTML = "";
+  for (const [segment, frames] of [...bySegment.entries()].sort((a,b)=>a[1][0]-b[1][0])){
+    const el = document.createElement("span");
+    const duration = (frames[frames.length - 1] - frames[0]) / FPS;
+    const rawSegments = topology.groups[segment].slice().sort((a,b)=>a-b);
+    el.className = "segment";
+    el.style.background = "hsl(" + ((segment * 73) % 360) + " 45% 35%)";
+    el.textContent = "规范段 " + segment + (rawSegments.length > 1 ? "（原 " + rawSegments.join("+") + "）" : "") + " · " + frames.length + "关键帧 · " + duration.toFixed(1) + "s";
+    el.title = "frame " + frames[0] + " → " + frames[frames.length - 1];
+    el.onclick = () => { vid.currentTime = frames[0] / FPS; refreshStats(); draw(); };
+    segmentWrap.appendChild(el);
+  }
   const wrap = document.getElementById("marks");
   wrap.innerHTML = "";
-  for (const k of keys){
+  for (let index = 0; index < keys.length; index++){
+    const k = keys[index];
     const el = document.createElement("span");
-    el.className = "mark" + (k === currentFrame() ? " cur" : "");
-    el.textContent = k;
-    el.onclick = () => { vid.currentTime = k / 29.97; refreshStats(); draw(); };
+    const normalizedSegment = topology.normalized.get(ann[k].seg);
+    const frames = bySegment.get(normalizedSegment);
+    const position = frames.indexOf(k);
+    const previous = position > 0 ? frames[position - 1] : null;
+    const longGap = previous !== null && k - previous > MAX_INTERP_GAP;
+    el.className = "mark" + (k === currentFrame() ? " cur" : "") + (longGap ? " gap" : "");
+    el.style.background = "hsl(" + ((normalizedSegment * 73) % 360) + " 35% 28%)";
+    el.textContent = normalizedSegment + ":" + k;
+    el.title = longGap ? "与上一关键帧相隔 " + (k - previous) + " 帧（>2s，不插值）" : "规范段 " + normalizedSegment + "（原段 " + ann[k].seg + "），frame " + k;
+    el.onclick = () => { vid.currentTime = k / FPS; refreshStats(); draw(); };
     wrap.appendChild(el);
   }
 }
@@ -502,8 +775,8 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 document.addEventListener("keydown", e => {
   const k = e.key;
   if (k === " "){ e.preventDefault(); vid.paused ? vid.play() : vid.pause(); }
-  else if (k === "ArrowLeft"){ vid.currentTime = Math.max(0, vid.currentTime - (e.shiftKey ? 10 : 1)/29.97); refreshStats(); draw(); }
-  else if (k === "ArrowRight"){ vid.currentTime += (e.shiftKey ? 10 : 1)/29.97; refreshStats(); draw(); }
+  else if (k === "a" || k === "A" || k === "ArrowLeft"){ vid.currentTime = Math.max(0, vid.currentTime - (e.shiftKey ? 10 : 1)/FPS); refreshStats(); draw(); }
+  else if (k === "d" || k === "D" || k === "ArrowRight"){ vid.currentTime += (e.shiftKey ? 10 : 1)/FPS; refreshStats(); draw(); }
   else if (k === "1"){ vid.playbackRate = 0.5; }
   else if (k === "2"){ vid.playbackRate = 1; }
   else if (k === "3"){ vid.playbackRate = 2; }
@@ -515,6 +788,9 @@ document.addEventListener("keydown", e => {
   }
   else if (k === "Backspace"){ e.preventDefault(); undoLast(); }
   else if (k === "h" || k === "H"){ hintOn = !hintOn; document.getElementById("hintbox").checked = hintOn; draw(); }
+  else if (k === "j" || k === "J"){ jumpKeyframe(-1); }
+  else if (k === "k" || k === "K"){ jumpKeyframe(1); }
+  else if (k === "r" || k === "R"){ markReviewed(); }
   else if (k === "["){ resizeBox(-4); }
   else if (k === "]"){ resizeBox(4); }
   else if ((e.ctrlKey || e.metaKey) && k === "s"){ e.preventDefault(); saveNow(); }
@@ -526,6 +802,13 @@ fetch("/api/gt/" + SRC).then(r=>r.json()).then(d=>{
   for (const a of d.annotations){
     ann[a.frame] = {bbox: a.bbox, seg: a.seg};
     segCounter = Math.max(segCounter, a.seg + 1);
+  }
+  reviewedThrough = Number.isInteger(d.reviewed_through_frame) ? d.reviewed_through_frame : null;
+  const keys = Object.keys(ann).map(Number).sort((a,b)=>a-b);
+  const resume = reviewedThrough !== null ? reviewedThrough : (keys.length ? keys[keys.length - 1] : -1);
+  if (resume >= 0){
+    const seek = () => { vid.currentTime = (resume + 1) / FPS; refreshStats(); draw(); };
+    if (vid.readyState >= 1) seek(); else vid.addEventListener("loadedmetadata", seek, {once:true});
   }
   refreshStats();
 });

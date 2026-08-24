@@ -52,6 +52,13 @@ eval/ball_crops/*/pilot/extracted*/
 eval/ball_crops/*/pilot/frames*/
 eval/ball_crops/*/pilot/strips*/
 
+# Local recovery copies from the video GT annotation server
+eval/ball_gt/*/annotations.jsonl.bak
+eval/ball_gt/*/backups/
+
+# Local browser state from annotation UI smoke tests
+.playwright-cli/
+
 # OpenCode/OpenChamber local state
 .opencode/
 .openchamber/

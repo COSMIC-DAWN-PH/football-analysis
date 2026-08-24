@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil, exp, hypot
+from math import ceil, exp, hypot, sqrt
 from pathlib import Path
 from typing import Iterable, List, Optional
 
@@ -82,6 +82,65 @@ def offset_bbox(
     return x1 + offset_x, y1 + offset_y, x2 + offset_x, y2 + offset_y
 
 
+def player_consistency_gate(
+    candidates: list[BallCandidate],
+    player_tracks: dict,
+    distance_gate: float | None = None,
+    size_factor_gate: float | None = None,
+    minimum_players: int = 2,
+) -> list[BallCandidate]:
+    """Keep candidates physically consistent with nearby player scale.
+
+    The gate is deliberately opt-in.  When it is disabled, or when too few
+    players are visible to provide a useful scene-scale estimate, candidates
+    pass through unchanged.
+    """
+    if distance_gate is None and size_factor_gate is None:
+        return candidates
+    if distance_gate is not None and distance_gate <= 0:
+        raise ValueError("distance_gate must be positive")
+    if size_factor_gate is not None and size_factor_gate < 1:
+        raise ValueError("size_factor_gate must be at least 1")
+    if minimum_players < 1:
+        raise ValueError("minimum_players must be at least 1")
+
+    players: list[tuple[float, float, float]] = []
+    for player_type in ("player", "goalkeeper"):
+        for player in player_tracks.get(player_type, {}).values():
+            x1, y1, x2, y2 = map(float, player["bbox"])
+            height = max(1.0, y2 - y1)
+            players.append(((x1 + x2) / 2, y2, height))
+    if len(players) < minimum_players:
+        return candidates
+
+    kept: list[BallCandidate] = []
+    for candidate in candidates:
+        center_x, center_y = candidate.center
+        nearest = min(
+            players,
+            key=lambda player: hypot(center_x - player[0], center_y - player[1])
+            / max(48.0, 2.5 * player[2]),
+        )
+        distance_ratio = hypot(
+            center_x - nearest[0], center_y - nearest[1]
+        ) / max(48.0, 2.5 * nearest[2])
+        candidate_width = max(0.0, candidate.bbox[2] - candidate.bbox[0])
+        candidate_height = max(0.0, candidate.bbox[3] - candidate.bbox[1])
+        candidate_size = sqrt(candidate_width * candidate_height)
+        expected_size = max(1.0, nearest[2] / 8.0)
+        size_factor = (
+            max(candidate_size / expected_size, expected_size / candidate_size)
+            if candidate_size > 0
+            else float("inf")
+        )
+        if distance_gate is not None and distance_ratio > distance_gate:
+            continue
+        if size_factor_gate is not None and size_factor > size_factor_gate:
+            continue
+        kept.append(candidate)
+    return kept
+
+
 class BallDetector:
     """High-recall ball detector using whole-frame and tiled inference."""
 
@@ -127,11 +186,106 @@ class BallDetector:
     def detect(self, frames: List[np.ndarray]) -> list[list[BallCandidate]]:
         return [self._detect_frame(frame) for frame in frames]
 
+    def detect_rois(
+        self,
+        frame: np.ndarray,
+        rois: Iterable[tuple[float, float, float, float]],
+        maximum_upscale: float | None = None,
+    ) -> list[BallCandidate]:
+        """Run the same ball model on selected source-image regions.
+
+        ``maximum_upscale`` uses controlled resizing followed by padding to the
+        fixed model canvas.  This avoids stretching a 100px ROI all the way to
+        1280px, which moves ball scale far outside the detector's training
+        distribution.
+        """
+        if maximum_upscale is not None and maximum_upscale <= 0:
+            raise ValueError("maximum_upscale must be positive")
+        frame_height, frame_width = frame.shape[:2]
+        candidates: list[BallCandidate] = []
+        for roi in rois:
+            x1 = max(0, int(roi[0]))
+            y1 = max(0, int(roi[1]))
+            x2 = min(frame_width, ceil(roi[2]))
+            y2 = min(frame_height, ceil(roi[3]))
+            if x2 - x1 < 2 or y2 - y1 < 2:
+                continue
+            crop = frame[y1:y2, x1:x2]
+            if maximum_upscale is None:
+                candidates.extend(self._predict(crop, x1, y1, self.tile_imgsz))
+                continue
+            scale = min(
+                maximum_upscale,
+                self.tile_imgsz / crop.shape[1],
+                self.tile_imgsz / crop.shape[0],
+            )
+            resized_width = max(2, min(self.tile_imgsz, round(crop.shape[1] * scale)))
+            resized_height = max(2, min(self.tile_imgsz, round(crop.shape[0] * scale)))
+            resized = cv2.resize(
+                crop,
+                (resized_width, resized_height),
+                interpolation=cv2.INTER_LINEAR,
+            )
+            background = np.median(crop.reshape(-1, crop.shape[2]), axis=0).astype(
+                np.uint8
+            )
+            canvas = np.empty(
+                (self.tile_imgsz, self.tile_imgsz, crop.shape[2]), dtype=crop.dtype
+            )
+            canvas[:] = background
+            pad_x = (self.tile_imgsz - resized_width) // 2
+            pad_y = (self.tile_imgsz - resized_height) // 2
+            canvas[
+                pad_y : pad_y + resized_height,
+                pad_x : pad_x + resized_width,
+            ] = resized
+            for candidate in self._predict(canvas, 0, 0, self.tile_imgsz):
+                center_x, center_y = candidate.center
+                if not (
+                    pad_x <= center_x <= pad_x + resized_width
+                    and pad_y <= center_y <= pad_y + resized_height
+                ):
+                    continue
+                mapped_bbox = (
+                    (candidate.bbox[0] - pad_x) / scale + x1,
+                    (candidate.bbox[1] - pad_y) / scale + y1,
+                    (candidate.bbox[2] - pad_x) / scale + x1,
+                    (candidate.bbox[3] - pad_y) / scale + y1,
+                )
+                candidates.append(
+                    BallCandidate(mapped_bbox, candidate.confidence)
+                )
+        return non_max_suppression(candidates)
+
     def _detect_frame(self, frame: np.ndarray) -> list[BallCandidate]:
         candidates: list[BallCandidate] = []
         candidates.extend(self._predict(frame, 0, 0, self.global_imgsz))
-        for tile, offset_x, offset_y in overlapping_tiles(frame, overlap=self.overlap):
-            candidates.extend(self._predict(tile, offset_x, offset_y, self.tile_imgsz))
+        for tile, offset_x, offset_y in overlapping_tiles(
+            frame, overlap=self.overlap
+        ):
+            candidates.extend(
+                self._predict(tile, offset_x, offset_y, self.tile_imgsz)
+            )
+        return non_max_suppression(candidates)
+
+    def detect_tiles(
+        self,
+        frame: np.ndarray,
+        rows: int = 2,
+        columns: int = 2,
+        overlap: float | None = None,
+    ) -> list[BallCandidate]:
+        """Run tiled inference with an explicit grid, without a global pass."""
+        candidates: list[BallCandidate] = []
+        for tile, offset_x, offset_y in overlapping_tiles(
+            frame,
+            rows=rows,
+            columns=columns,
+            overlap=self.overlap if overlap is None else overlap,
+        ):
+            candidates.extend(
+                self._predict(tile, offset_x, offset_y, self.tile_imgsz)
+            )
         return non_max_suppression(candidates)
 
     def _predict(
@@ -252,11 +406,17 @@ class BallTracker:
         maximum_prediction_seconds: float = 0.5,
         restart_gap_seconds: float = 0.15,
         confirmations_required: int = 3,
+        player_distance_gate: float | None = None,
+        player_size_factor_gate: float | None = None,
+        player_gate_minimum_players: int = 2,
     ) -> None:
         self.geometry = geometry
         self.maximum_prediction_seconds = maximum_prediction_seconds
         self.restart_gap_seconds = restart_gap_seconds
         self.confirmations_required = confirmations_required
+        self.player_distance_gate = player_distance_gate
+        self.player_size_factor_gate = player_size_factor_gate
+        self.player_gate_minimum_players = player_gate_minimum_players
         self.track_segment = 0
         self._reset_motion_state()
 
@@ -279,6 +439,13 @@ class BallTracker:
     ) -> dict[int, dict]:
         predicted_center, predicted_position = self._prediction(
             timestamp_seconds, calibration
+        )
+        candidates = player_consistency_gate(
+            candidates,
+            player_tracks,
+            distance_gate=self.player_distance_gate,
+            size_factor_gate=self.player_size_factor_gate,
+            minimum_players=self.player_gate_minimum_players,
         )
         valid_candidates = self._metric_candidates(candidates, calibration)
         observation_gap = (

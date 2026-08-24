@@ -1,6 +1,7 @@
 import unittest
 import tempfile
 from pathlib import Path
+from unittest.mock import Mock
 
 import numpy as np
 import yaml
@@ -16,6 +17,7 @@ from tracking.ball_tracker import (
     non_max_suppression,
     offset_bbox,
     overlapping_tiles,
+    player_consistency_gate,
 )
 
 
@@ -58,6 +60,42 @@ class BallDetectionUtilitiesTests(unittest.TestCase):
                 encoding="utf-8",
             )
             self.assertIsNone(BallDetector._fixed_export_size(model_dir))
+
+    def test_roi_detection_clips_crop_and_preserves_source_offset(self) -> None:
+        detector = BallDetector.__new__(BallDetector)
+        detector.tile_imgsz = 1280
+        candidate = BallCandidate((101, 51, 109, 59), 0.5)
+        detector._predict = Mock(return_value=[candidate])
+        frame = np.zeros((100, 200, 3), dtype=np.uint8)
+        result = detector.detect_rois(frame, [(100.2, 50.4, 250.0, 120.0)])
+        self.assertEqual(result, [candidate])
+        crop, offset_x, offset_y, image_size = detector._predict.call_args.args
+        self.assertEqual(crop.shape[:2], (50, 100))
+        self.assertEqual((offset_x, offset_y, image_size), (100, 50, 1280))
+
+    def test_padded_roi_detection_maps_canvas_bbox_back_to_source(self) -> None:
+        detector = BallDetector.__new__(BallDetector)
+        detector.tile_imgsz = 1280
+        detector._predict = Mock(
+            return_value=[BallCandidate((625, 625, 655, 655), 0.5)]
+        )
+        frame = np.zeros((200, 300, 3), dtype=np.uint8)
+        result = detector.detect_rois(
+            frame,
+            [(100, 50, 200, 150)],
+            maximum_upscale=2.0,
+        )
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].bbox, (142.5, 92.5, 157.5, 107.5))
+
+    def test_explicit_dense_tile_grid_runs_each_tile_once(self) -> None:
+        detector = BallDetector.__new__(BallDetector)
+        detector.tile_imgsz = 1280
+        detector.overlap = 0.2
+        detector._predict = Mock(return_value=[])
+        frame = np.zeros((108, 192, 3), dtype=np.uint8)
+        self.assertEqual(detector.detect_tiles(frame, rows=2, columns=3), [])
+        self.assertEqual(detector._predict.call_count, 6)
 
 
 class BallTrackerTests(unittest.TestCase):
@@ -208,6 +246,35 @@ class BallTrackerTests(unittest.TestCase):
             (1080, 1920, 3),
         )
         self.assertNotEqual(first[1]["track_segment"], jumped[1]["track_segment"])
+
+    def test_opt_in_player_gate_removes_far_high_confidence_candidate(self) -> None:
+        tracker = BallTracker(
+            self.geometry,
+            player_distance_gate=1.2,
+            player_size_factor_gate=2.2,
+        )
+        players = {
+            "player": {
+                1: {"bbox": [80, 40, 100, 104]},
+                2: {"bbox": [180, 40, 200, 104]},
+            },
+            "goalkeeper": {},
+        }
+        result = tracker.update(
+            [
+                BallCandidate((92, 96, 100, 104), 0.2),
+                BallCandidate((500, 96, 508, 104), 0.9),
+            ],
+            0.0,
+            CalibrationResult(image_to_pitch=None),
+            players,
+            (1080, 1920, 3),
+        )
+        self.assertEqual(result[1]["bbox"], [92.0, 96.0, 100.0, 104.0])
+
+    def test_player_gate_defaults_to_no_behavior_change(self) -> None:
+        candidate = BallCandidate((500, 96, 508, 104), 0.9)
+        self.assertEqual(player_consistency_gate([candidate], {}), [candidate])
 
 
 class MetricPossessionTests(unittest.TestCase):

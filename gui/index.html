@@ -212,7 +212,9 @@
     .team-card h3 { margin: 0 0 14px; font-size: 15px; }
     .team-card .field + .field { margin-top: 12px; }
     .color-row { display: grid; grid-template-columns: 50px 1fr; gap: 10px; align-items: center; }
+    .color-row[hidden] { display: none; }
     input[type="color"] { width: 50px; height: 42px; padding: 3px; border: 1px solid var(--line-strong); border-radius: 10px; background: #0b1712; }
+    input[type="color"]:disabled { opacity: .45; }
     .rgb-value { color: var(--muted); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 
     .notice { padding: 13px 15px; border: 1px solid rgba(255, 202, 106, .22); border-radius: 12px; color: #efdcb3; background: rgba(255, 202, 106, .07); font-size: 13px; line-height: 1.55; }
@@ -372,6 +374,10 @@
       .section-title { align-items: flex-start; flex-direction: column; }
       .connection-notice, .upload-zone { align-items: flex-start; flex-direction: column; }
     }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
   </style>
 </head>
 <body>
@@ -417,8 +423,8 @@
             </div>
             <div class="notice good">普通检查会核对依赖和已知文件哈希；加载模型检查更彻底，但需要更多时间和内存。</div>
             <div class="actions">
-              <label class="toggle"><input id="setup-load-models" type="checkbox">加载两个 YOLO 模型并验证元数据</label>
-              <button class="button primary" type="button" id="run-setup" data-requires-server>开始环境检查</button>
+              <label class="toggle"><input id="setup-load-models" type="checkbox">加载三个 YOLO 模型并验证元数据</label>
+              <button class="button primary" type="button" id="run-setup" data-requires-server data-start-job>开始环境检查</button>
             </div>
             <div class="setup-summary" aria-label="环境检查摘要">
               <div class="setup-metric ok"><strong id="setup-ok">0</strong><span>正常项目</span></div>
@@ -489,7 +495,20 @@
                   </div>
                 </div>
               </div>
-              <div class="field full"><div class="notice" id="team-compatibility">当前队名兼容战术总结脚本。</div></div>
+              <div class="field full">
+                <span class="label">球衣参考色选项</span>
+                <label class="toggle"><input id="analysis-skip-gk" type="checkbox">门将与对方球员颜色相近，忽略门将参考色</label>
+                <div class="hint">当任一方门将球衣颜色与对方球员相近（例如黑门将对黑色球员）时勾选，只按球员球衣颜色分队，避免暗色样本被门将参考色误判抢走。</div>
+              </div>
+              <div class="field full">
+                <span class="label">裁判识别（可选）</span>
+                <div class="toggle-row">
+                  <label class="toggle"><input id="analysis-use-referee-color" type="checkbox">使用裁判球衣参考色</label>
+                  <div class="color-row" id="analysis-referee-color-row" hidden><input id="analysis-referee-color" type="color" value="#f1d447" aria-label="裁判球衣颜色" disabled><span class="rgb-value" data-for="analysis-referee-color">241, 212, 71</span></div>
+                </div>
+                <div class="hint">目标模型容易把裁判识别成球员时启用；请选择画面中有代表性的裁判上衣颜色。</div>
+              </div>
+              <div class="field full"><div class="notice" id="team-compatibility">队名会写入标注与轨迹；生成战术总结时请填写相同的队名。</div></div>
               <div class="field full">
                 <span class="label">可选叠加与窗口</span>
                 <div class="toggle-row">
@@ -506,15 +525,20 @@
                   <div class="field"><label for="analysis-keypoints-model">球场关键点模型</label><select id="analysis-keypoints-model" required></select></div>
                   <div class="field"><label for="analysis-ball-model">独立足球检测模型</label><select id="analysis-ball-model" required></select><div class="hint">模型类别 0 必须为 ball。</div></div>
                   <div class="field"><label for="analysis-field-image">球场俯视底图</label><select id="analysis-field-image" required></select></div>
+                  <div class="field"><label for="analysis-device">推理设备</label><input id="analysis-device" type="text" value="auto" list="analysis-device-options" maxlength="100" required><datalist id="analysis-device-options"><option value="auto"><option value="cpu"><option value="cuda"><option value="cuda:0"><option value="intel:NPU"><option value="intel:GPU"><option value="intel:CPU"></datalist><div class="hint">推荐 auto；也可指定 cpu、cuda:0 或 OpenVINO 的 intel:GPU / intel:NPU。</div></div>
                   <div class="field"><label for="analysis-batch">推理批量大小</label><input id="analysis-batch" type="number" min="1" step="1" value="1" required><div class="hint">CPU 建议保持 1。</div></div>
                   <div class="field"><label for="analysis-skip">跳过开头秒数</label><input id="analysis-skip" type="number" min="0" step="1" value="0" required></div>
+                  <div class="field full"><div class="notice">实验性足球候选门控默认关闭。只有完成本场数据验证后再填写；留空会沿用稳定默认链路。</div></div>
+                  <div class="field"><label for="analysis-ball-distance-gate">足球—球员距离门槛</label><input id="analysis-ball-distance-gate" type="number" min="0.001" step="0.01" placeholder="留空关闭"><div class="hint">候选中心到最近球员框的归一化距离；当前试验参考值 1.2。</div></div>
+                  <div class="field"><label for="analysis-ball-size-gate">足球—球员尺寸因子门槛</label><input id="analysis-ball-size-gate" type="number" min="1" step="0.01" placeholder="留空关闭"><div class="hint">相对球员尺度的候选上限；当前试验参考值 2.2。</div></div>
+                  <div class="field"><label for="analysis-ball-gate-min-players">门控最少可见球员数</label><input id="analysis-ball-gate-min-players" type="number" min="1" step="1" value="2" required><div class="hint">画面中球员少于该数值时自动停用实验门控。</div></div>
                   <div class="field"><label for="analysis-output">标注视频路径</label><input id="analysis-output" type="text" required></div>
                   <div class="field full"><label for="analysis-tracks">原始轨迹目录</label><input id="analysis-tracks" type="text" required><div class="hint">默认生成 object、keypoint、calibration 三个 JSONL；只能写入 output_videos。</div></div>
                 </div>
               </details>
             </div>
             <div class="actions">
-              <button class="button primary" type="submit" data-requires-server>开始视频分析</button>
+              <button class="button primary" type="submit" data-requires-server data-start-job>开始视频分析</button>
               <button class="button secondary" type="button" id="reset-output-paths">应用推荐路径</button>
             </div>
           </form>
@@ -530,12 +554,14 @@
               <div class="field full"><label for="summary-tracks">轨迹目录</label><select id="summary-tracks" required></select></div>
               <div class="field"><label for="summary-source">源视频</label><select id="summary-source" required></select></div>
               <div class="field"><label for="summary-fps">轨迹采样 FPS</label><input id="summary-fps" type="number" min="0.001" step="0.001" value="1" required><div class="hint">普通全帧分析使用源视频 FPS。</div></div>
+              <div class="field"><label for="summary-club1">第一队名称</label><input id="summary-club1" type="text" value="Red" maxlength="100" required></div>
+              <div class="field"><label for="summary-club2">第二队名称</label><input id="summary-club2" type="text" value="Blue" maxlength="100" required></div>
               <div class="field"><label for="summary-pitch-length">球场边线长度（米）</label><input id="summary-pitch-length" type="number" min="33.01" step="0.01" value="105" required></div>
               <div class="field"><label for="summary-pitch-width">球场球门线宽度（米）</label><input id="summary-pitch-width" type="number" min="40.32" step="0.01" value="68" required></div>
               <div class="field full"><label for="summary-output">总结输出目录</label><input id="summary-output" type="text" value="output_videos/match/summary" required></div>
-              <div class="field full"><div class="notice">当前总结脚本只识别队名 Red 与 Blue。轨迹来自其他队名时，报告不会正确统计两队。</div></div>
+              <div class="field full"><div class="notice good" id="summary-team-notice">队名应与视频分析时填写的一致（默认 Red 与 Blue），报告与图表使用这两个队名。</div></div>
             </div>
-            <div class="actions"><button class="button primary" type="submit" data-requires-server>生成战术总结</button></div>
+            <div class="actions"><button class="button primary" type="submit" data-requires-server data-start-job>生成战术总结</button></div>
           </form>
         </section>
       </div>
@@ -621,13 +647,21 @@
       toast.timer = setTimeout(() => { element.className = "toast"; }, 4200);
     }
 
+    function updateControlAvailability() {
+      const active = ["starting", "running"].includes(state.currentJob?.status);
+      $$('[data-requires-server]').forEach((control) => {
+        control.disabled = !state.backendAvailable
+          || (control.hasAttribute("data-start-job") && active)
+          || (control.id === "choose-video" && state.uploading);
+      });
+      $("#video-file").disabled = !state.backendAvailable || state.uploading;
+      $("#video-drop-zone").setAttribute("aria-disabled", (!state.backendAvailable || state.uploading) ? "true" : "false");
+      $("#stop-job").disabled = !state.backendAvailable || !active;
+    }
+
     function setBackendAvailable(available, directFile = false) {
       state.backendAvailable = available;
-      $$('[data-requires-server]').forEach((control) => {
-        control.disabled = !available || (control.id === "choose-video" && state.uploading);
-      });
-      $("#video-file").disabled = !available || state.uploading;
-      $("#video-drop-zone").setAttribute("aria-disabled", (!available || state.uploading) ? "true" : "false");
+      updateControlAvailability();
 
       const notice = $("#connection-notice");
       notice.hidden = available;
@@ -668,8 +702,23 @@
       $$(".tab-button").forEach((button) => {
         const active = button.dataset.tab === name;
         button.setAttribute("aria-selected", active ? "true" : "false");
+        button.tabIndex = active ? 0 : -1;
         $(`#panel-${button.dataset.tab}`).hidden = !active;
       });
+    }
+
+    function moveTabFocus(event) {
+      const tabs = $$(".tab-button");
+      const current = tabs.indexOf(event.currentTarget);
+      let next = null;
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (current + 1) % tabs.length;
+      if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (current - 1 + tabs.length) % tabs.length;
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = tabs.length - 1;
+      if (next == null) return;
+      event.preventDefault();
+      setTab(tabs[next].dataset.tab);
+      tabs[next].focus();
     }
 
     function fillSelect(element, items, labelFn, selectedPath = null, emptyText = "暂无可选文件", requireExplicit = false) {
@@ -734,9 +783,7 @@
 
     function setUploadBusy(busy) {
       state.uploading = busy;
-      $("#choose-video").disabled = busy || !state.backendAvailable;
-      $("#video-file").disabled = busy || !state.backendAvailable;
-      $("#video-drop-zone").setAttribute("aria-disabled", (busy || !state.backendAvailable) ? "true" : "false");
+      updateControlAvailability();
     }
 
     function uploadVideo(file) {
@@ -842,12 +889,38 @@
     }
 
     function updateTeamCompatibility() {
-      const compatible = $("#analysis-club1").value.trim() === "Red" && $("#analysis-club2").value.trim() === "Blue";
+      const first = $("#analysis-club1").value.trim();
+      const second = $("#analysis-club2").value.trim();
+      const duplicate = first && second && first.localeCompare(second, undefined, { sensitivity: "accent" }) === 0;
+      const message = duplicate ? "两队名称必须不同。" : "队名会写入标注与轨迹，并在生成总结时自动带入。";
+      [$("#analysis-club1"), $("#analysis-club2")].forEach((input) => input.setCustomValidity(duplicate ? message : ""));
       const notice = $("#team-compatibility");
-      notice.className = `notice${compatible ? " good" : ""}`;
-      notice.textContent = compatible
-        ? "当前队名兼容战术总结脚本。"
-        : "提醒：战术总结脚本只识别 Red 与 Blue；自定义队名仍可完成视频分析，但不会进入总结统计。";
+      notice.className = `notice${first && second && !duplicate ? " good" : ""}`;
+      notice.textContent = message;
+    }
+
+    function updateSummaryTeamValidity() {
+      const first = $("#summary-club1").value.trim();
+      const second = $("#summary-club2").value.trim();
+      const duplicate = first && second && first.localeCompare(second, undefined, { sensitivity: "accent" }) === 0;
+      const message = duplicate
+        ? "两队名称必须不同。"
+        : "队名应与视频分析时填写的一致，报告与图表会使用这两个名称。";
+      [$("#summary-club1"), $("#summary-club2")].forEach((input) => input.setCustomValidity(duplicate ? message : ""));
+      const notice = $("#summary-team-notice");
+      notice.className = `notice${first && second && !duplicate ? " good" : ""}`;
+      notice.textContent = message;
+    }
+
+    function updateRefereeColorControl() {
+      const enabled = $("#analysis-use-referee-color").checked;
+      $("#analysis-referee-color").disabled = !enabled;
+      $("#analysis-referee-color-row").hidden = !enabled;
+    }
+
+    function optionalNumber(selector) {
+      const value = $(selector).value.trim();
+      return value === "" ? null : Number(value);
     }
 
     function analysisOptions() {
@@ -862,6 +935,7 @@
         pitch_width_m: Number($("#analysis-pitch-width").value),
         tracks_dir: $("#analysis-tracks").value.trim(),
         batch_size: Number($("#analysis-batch").value),
+        device: $("#analysis-device").value.trim(),
         skip_seconds: Number($("#analysis-skip").value),
         estimate_speed: $("#analysis-speed").checked,
         annotate_possession: $("#analysis-possession").checked,
@@ -872,6 +946,11 @@
         club2_name: $("#analysis-club2").value.trim(),
         club2_player: hexToRgb($("#club2-player").value),
         club2_goalkeeper: hexToRgb($("#club2-goalkeeper").value),
+        skip_goalkeeper_matching: $("#analysis-skip-gk").checked,
+        referee_color: $("#analysis-use-referee-color").checked ? hexToRgb($("#analysis-referee-color").value) : null,
+        ball_player_distance_gate: optionalNumber("#analysis-ball-distance-gate"),
+        ball_player_size_factor_gate: optionalNumber("#analysis-ball-size-gate"),
+        ball_player_gate_minimum_players: Number($("#analysis-ball-gate-min-players").value),
       };
     }
 
@@ -929,6 +1008,7 @@
       $("#job-id").textContent = job.id || "NO JOB";
       const active = ["starting", "running"].includes(job.status);
       $("#stop-job").disabled = !active;
+      updateControlAvailability();
 
       const progress = $("#job-progress");
       const fill = $("#job-progress-fill");
@@ -1014,6 +1094,9 @@
       if (options.source_fps) $("#summary-fps").value = options.source_fps;
       if (options.pitch_length_m) $("#summary-pitch-length").value = options.pitch_length_m;
       if (options.pitch_width_m) $("#summary-pitch-width").value = options.pitch_width_m;
+      if (options.club1_name) $("#summary-club1").value = options.club1_name;
+      if (options.club2_name) $("#summary-club2").value = options.club2_name;
+      updateSummaryTeamValidity();
       const parent = options.output.split("/").slice(0, -1).join("/");
       $("#summary-output").value = `${parent}/summary`;
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1121,9 +1204,14 @@
       } catch (error) { toast(error.message, true); }
     }
 
-    $$(".tab-button").forEach((button) => button.addEventListener("click", () => setTab(button.dataset.tab)));
+    $$(".tab-button").forEach((button) => {
+      button.addEventListener("click", () => setTab(button.dataset.tab));
+      button.addEventListener("keydown", moveTabFocus);
+    });
     $$('input[type="color"]').forEach((input) => input.addEventListener("input", () => syncColorLabel(input)));
     [$("#analysis-club1"), $("#analysis-club2")].forEach((input) => input.addEventListener("input", updateTeamCompatibility));
+    [$("#summary-club1"), $("#summary-club2")].forEach((input) => input.addEventListener("input", updateSummaryTeamValidity));
+    $("#analysis-use-referee-color").addEventListener("change", updateRefereeColorControl);
     $("#analysis-input").addEventListener("change", updateVideoMeta);
     $("#summary-source").addEventListener("change", () => updateSummaryFps(true));
     $("#summary-tracks").addEventListener("change", applySummaryPathFromTracks);
@@ -1176,13 +1264,18 @@
         output_dir: $("#summary-output").value.trim(),
         fps: Number($("#summary-fps").value),
         source: $("#summary-source").value,
+        club1_name: $("#summary-club1").value.trim(),
+        club2_name: $("#summary-club2").value.trim(),
         pitch_length_m: Number($("#summary-pitch-length").value),
         pitch_width_m: Number($("#summary-pitch-width").value),
       }});
     });
 
+    setTab("setup");
     applyRecommendedPaths();
     updateTeamCompatibility();
+    updateSummaryTeamValidity();
+    updateRefereeColorControl();
     if (window.location.protocol === "file:") {
       setBackendAvailable(false, true);
       setUploadStatus("请先通过 start_gui.cmd 启动本地服务。", "error");
