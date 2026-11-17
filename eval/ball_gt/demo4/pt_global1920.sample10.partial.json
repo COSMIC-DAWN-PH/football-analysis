@@ -1,0 +1,260 @@
+{
+  "scope": "fixed dense layouts selected without GT; GT scores output only",
+  "device": "cpu",
+  "requested_image_size": 1920,
+  "resolved_image_size": 1920,
+  "model": "models\\weights\\ball-detection.pt",
+  "trigger_mode": "empty",
+  "runtime_frames": 2037,
+  "runtime_trigger_frames": 864,
+  "runtime_trigger_rate": 0.4242,
+  "eligible_human_keyframes": 143,
+  "evaluated_human_keyframes": 10,
+  "pilot_trigger_items": 10,
+  "overlap": 0.2,
+  "player_gate": {
+    "distance": 1.2,
+    "size_factor": 2.2,
+    "minimum_players": 2
+  },
+  "layouts": {
+    "1x1": {
+      "rows": 1,
+      "columns": 1,
+      "tile_calls_per_trigger_frame": 1,
+      "estimated_extra_compute_vs_five_primary_calls": 0.0848,
+      "gt_raw_hits": 0,
+      "gt_gated_hits": 0,
+      "pilot_raw_false_matches": 1,
+      "pilot_gated_false_matches": 1,
+      "raw_candidates": 8,
+      "gated_candidates": 3,
+      "inference_seconds_total": 7.768,
+      "inference_seconds_per_trigger_frame": 0.3884
+    }
+  },
+  "details": {
+    "1x1": [
+      {
+        "frame": 0,
+        "gt_target": true,
+        "gt_raw_match": false,
+        "gt_gated_match": false,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 0,
+        "gated_candidates": 0,
+        "inference_seconds": 1.98965
+      },
+      {
+        "frame": 6,
+        "gt_target": false,
+        "gt_raw_match": null,
+        "gt_gated_match": null,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 0,
+        "gated_candidates": 0,
+        "inference_seconds": 0.28666
+      },
+      {
+        "frame": 7,
+        "gt_target": false,
+        "gt_raw_match": null,
+        "gt_gated_match": null,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 0,
+        "gated_candidates": 0,
+        "inference_seconds": 0.2853
+      },
+      {
+        "frame": 14,
+        "gt_target": false,
+        "gt_raw_match": null,
+        "gt_gated_match": null,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 0,
+        "gated_candidates": 0,
+        "inference_seconds": 0.29324
+      },
+      {
+        "frame": 23,
+        "gt_target": false,
+        "gt_raw_match": null,
+        "gt_gated_match": null,
+        "pilot_raw_false_matches": 1,
+        "pilot_gated_false_matches": 1,
+        "raw_candidates": 1,
+        "gated_candidates": 1,
+        "inference_seconds": 0.29797
+      },
+      {
+        "frame": 25,
+        "gt_target": false,
+        "gt_raw_match": null,
+        "gt_gated_match": null,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 0,
+        "gated_candidates": 0,
+        "inference_seconds": 0.32028
+      },
+      {
+        "frame": 31,
+        "gt_target": false,
+        "gt_raw_match": null,
+        "gt_gated_match": null,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 0,
+        "gated_candidates": 0,
+        "inference_seconds": 0.31029
+      },
+      {
+        "frame": 36,
+        "gt_target": false,
+        "gt_raw_match": null,
+        "gt_gated_match": null,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 1,
+        "gated_candidates": 1,
+        "inference_seconds": 0.29554
+      },
+      {
+        "frame": 38,
+        "gt_target": false,
+        "gt_raw_match": null,
+        "gt_gated_match": null,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 0,
+        "gated_candidates": 0,
+        "inference_seconds": 0.29668
+      },
+      {
+        "frame": 39,
+        "gt_target": false,
+        "gt_raw_match": null,
+        "gt_gated_match": null,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 0,
+        "gated_candidates": 0,
+        "inference_seconds": 0.30509
+      },
+      {
+        "frame": 40,
+        "gt_target": false,
+        "gt_raw_match": null,
+        "gt_gated_match": null,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 0,
+        "gated_candidates": 0,
+        "inference_seconds": 0.32142
+      },
+      {
+        "frame": 72,
+        "gt_target": true,
+        "gt_raw_match": false,
+        "gt_gated_match": false,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 1,
+        "gated_candidates": 0,
+        "inference_seconds": 0.317
+      },
+      {
+        "frame": 697,
+        "gt_target": true,
+        "gt_raw_match": false,
+        "gt_gated_match": false,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 0,
+        "gated_candidates": 0,
+        "inference_seconds": 0.38532
+      },
+      {
+        "frame": 921,
+        "gt_target": true,
+        "gt_raw_match": false,
+        "gt_gated_match": false,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 0,
+        "gated_candidates": 0,
+        "inference_seconds": 0.37279
+      },
+      {
+        "frame": 1062,
+        "gt_target": true,
+        "gt_raw_match": false,
+        "gt_gated_match": false,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 2,
+        "gated_candidates": 1,
+        "inference_seconds": 0.31819
+      },
+      {
+        "frame": 1522,
+        "gt_target": true,
+        "gt_raw_match": false,
+        "gt_gated_match": false,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 0,
+        "gated_candidates": 0,
+        "inference_seconds": 0.29994
+      },
+      {
+        "frame": 1729,
+        "gt_target": true,
+        "gt_raw_match": false,
+        "gt_gated_match": false,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 0,
+        "gated_candidates": 0,
+        "inference_seconds": 0.28673
+      },
+      {
+        "frame": 1762,
+        "gt_target": true,
+        "gt_raw_match": false,
+        "gt_gated_match": false,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 1,
+        "gated_candidates": 0,
+        "inference_seconds": 0.26696
+      },
+      {
+        "frame": 1893,
+        "gt_target": true,
+        "gt_raw_match": false,
+        "gt_gated_match": false,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 1,
+        "gated_candidates": 0,
+        "inference_seconds": 0.26197
+      },
+      {
+        "frame": 2036,
+        "gt_target": true,
+        "gt_raw_match": false,
+        "gt_gated_match": false,
+        "pilot_raw_false_matches": 0,
+        "pilot_gated_false_matches": 0,
+        "raw_candidates": 1,
+        "gated_candidates": 0,
+        "inference_seconds": 0.25668
+      }
+    ]
+  }
+}

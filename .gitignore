@@ -63,3 +63,6 @@ eval/ball_gt/*/backups/
 .opencode/
 .openchamber/
 *.traineddata
+
+# Presentation artifacts from the slides skill
+.frontend-slides/

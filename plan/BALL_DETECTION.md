@@ -120,7 +120,7 @@
 **3b. 其余参数级修复项（以实测归因为准，按优先级）**：conf 自适应/NMS 收紧（FP）；tile 重叠或分辨率调整、最小尺寸下限（FN）；尺寸门 48px/5% 与宽高比复核（FP/归属）；restart_gap / confirmations / max_prediction / 运动门距离曲线（断段/虚接）；归属距离与 grace（粘脚）；
 - 每项修复后：`eval_ball.py` 同口径对比 + kimi-k2.7-code 或 gpt-5.6-luna 验证门裁决（不通过即回退重做）。
 
-### Phase 4 — ball 微调数据集 + 云端训练（数据侧本轮必产出，训练可与 YOLO_FINETUNE 并行）
+### Phase 4 — ball 微调数据集 + 云端训练（数据侧本轮必产出，训练可与 YOLO_FINETUNE 并行；完整操作手册见 §12）
 - `tools/build_ball_finetune_dataset.py`（新增/复用 build_finetune_dataset）：**正样本以视频标注 GT 为准**——按 `frames_gt.jsonl` 框从原视频 1920×1080 裁球（自然含远场/模糊/遮挡难度分布），关键帧优先、插值帧补充去重；**负样本**用检测器 FP + 候选集 crops（鞋/袜/线/灯/头/手套/水印/垃圾）打包成 YOLO 二分类数据集；split 纪律：整场视频不跨 split、demo1~4 至少一场全新进 test、相邻帧不跨 split；
 - 量级对齐 training/README：≥600 球正样本 + 硬负样本 ≥300；
 - CUDA 云机 `python -m training.train_models --task ball`；未达 75%/90% 门槛不 promote（仅回传指标）。
@@ -298,3 +298,238 @@ L4 不直接上生产推理，按以下三道门推进；任一道失败就保�
 | `tests/test_ball_tracking.py` | 新增四层门控单测 |
 | `plan/BALL_DETECTION.md` | 本节 + 推进记录 |
 | 构造签名兼容性 | `BallDetector`/`BallTracker`/assigner 对外接口保持兼容（新增参数一律可选） |
+
+## 12. Phase 4 微调实操手册（本地 → 可选 Roboflow → CUDA 云机 → 本地验收）
+
+> **当前裁决（2026-08-24）**：还不能开始正式训练。现有 `ball_partial_demo4` 只有 425 个独立人工关键帧、20 个已确认硬负样本、1 个场次，且只有 `staging` split；`dataset_status.json` 为 `train_ready=false`。先完成 §12.2 的数据门，再执行后续步骤。
+
+### 12.1 先弄清三者分别做什么
+
+| 环境/服务 | 是否必需 | 本项目中的职责 |
+|-----------|----------|----------------|
+| 当前 Windows 本机 | 必需 | 视频标注、GT 规范化、数据集打包、训练前校验；训练后做 OpenVINO 与端到端回归 |
+| Roboflow 网页/API | **可选** | 网页精修框、管理数据版本、导入/导出 YOLO 数据；API 只是自动上传/下载工具，不是模型“调试器” |
+| NVIDIA CUDA 云机/云 GPU | 按当前路线必需 | 执行 Ultralytics 训练和 held-out 模型评估；本机 Intel Arc/NPU 继续负责 OpenVINO 推理，不负责 CUDA 训练 |
+
+推荐主路线：**本地生成并校验 YOLO 数据 →（需要网页精修时才进 Roboflow）→ CUDA 云机运行仓库训练脚本 → 把 `best.pt` 和报告下载回本机 → 本地导出/回放验收 → 达标后手动 promote**。
+
+另一条路线是直接使用 Roboflow Hosted Training，此时不需要自己租 CUDA 云机；但它的模型类型、训练参数、权重导出和本项目的 Ultralytics/OpenVINO 链路不完全一致。本轮优先使用仓库脚本 + CUDA 云机，Roboflow 只作为标注/版本管理工具。
+
+### 12.2 开训前数据门（全部满足才允许继续）
+
+1. 完成 demo4 frame 2037~4522，并复核 frame 142/143/146；随后补 demo1/2/3、raw1/2 的人工 GT。
+2. 至少准备 **600 个独立人工球关键帧**；插值帧可以扩充训练量，但不能替代这 600 个独立人工门。
+3. 至少准备 **300 个纯人工确认的硬负样本**，覆盖鞋、袜、场地线、点球点、灯、头、手套、球门/球网、角旗、场边垃圾等。空标签图片就是 YOLO 的 hard negative；不能把未审核候选当负样本。
+4. 至少覆盖 **4 个不同场次/球场**。按整场视频划分约 70/15/15；同一个源不能跨 split，相邻帧不能跨 split。
+5. 固定至少一个完全未参与调参和训练的场次为 `test`/hold-out，整个项目周期内不得临时更换。
+6. 打包后检查 `dataset_status.json`：只有 `train_ready=true` 才进入正式训练。`model_promotion_allowed=false` 在训练前是预期值，它表示训练完成后仍必须经过 §12.9 验收。
+
+当前状态可直接查看：
+
+```powershell
+Get-Content eval/finetune_dataset/ball_partial_demo4/dataset_status.json
+```
+
+### 12.3 本地重新生成规范化 GT
+
+每个视频完成一轮标注后先展开 GT。以下以 demo4 为例，人工原件 `annotations.jsonl` 永远不覆盖：
+
+```powershell
+.\.venv\Scripts\python.exe tools/interp_ball_gt.py `
+  --src demo4 `
+  --annotations eval/ball_gt/demo4/annotations.jsonl `
+  --normalized-annotations-out eval/ball_gt/demo4/annotations.optimized.jsonl
+```
+
+确认输出为 `eval/ball_gt/demo4/frames_gt.jsonl`，并重新运行局部/全片基线评估。其他视频使用同一命令，只替换 `--src` 与路径。
+
+### 12.4 本地打包最终 YOLO 数据集
+
+`tools/build_ball_finetune_dataset.py` 支持重复传入 `--source/--video/--gt/--split`。下面只是 split 示例；实际分配必须在第一次正式训练前固定，并满足整场不跨 split：
+
+```powershell
+.\.venv\Scripts\python.exe tools/build_ball_finetune_dataset.py `
+  --source raw1  --video "C:\Personal Profile\Profile\Video\raw1.mp4"  --gt eval/ball_gt/raw1/frames_gt.jsonl  --split train `
+  --source raw2  --video "C:\Personal Profile\Profile\Video\raw2.mp4"  --gt eval/ball_gt/raw2/frames_gt.jsonl  --split train `
+  --source demo1 --video "C:\Personal Profile\Profile\Video\demo1.mp4" --gt eval/ball_gt/demo1/frames_gt.jsonl --split val `
+  --source demo4 --video "C:\Personal Profile\Profile\Video\demo4.mp4" --gt eval/ball_gt/demo4/frames_gt.jsonl --split test `
+  --hard-negative-manifest eval/ball_crops/demo4/pilot/manifest.jsonl `
+  --include-interpolated --max-interpolation-span 10 --interpolated-stride 3 `
+  --out eval/finetune_dataset/ball_final
+```
+
+注意：
+
+- `--hard-negative-manifest` 指向的每一项都必须已被人工确认 `not_ball`；后续为每个源生成定稿 hard-negative manifest 后，可重复传入该参数。
+- `demo4` 如果曾用于 L1+L2 阈值选择，就不能再宣称是完全未见过的最终 hold-out；正式 split 应另选一个未参与调参的 demo。上例只展示命令结构，不代表最终 split 裁决。
+- 默认优先人工关键帧。只纳入相邻人工关键帧间隔 ≤10 帧的插值，并用 stride 去重，避免大量近重复帧主导训练。
+- 当前构建器会生成 `images/`、`labels/`、`manifest.csv` 和 `dataset_status.json`，但**不会自动生成最终 `data.yaml`**。正式开训前需增加数据集 finalize 步骤，或在数据集根目录创建并核对：
+
+```yaml
+path: .
+train: images/train
+val: images/val
+test: images/test
+names:
+  0: ball
+```
+
+正式数据集的 `manifest.csv` 必须继续保留 `source_video`、`source`（场次/球场）和 `split`，供交叉 split 泄漏检查。
+
+### 12.5 训练前必须完成的两项代码收口
+
+1. **起始权重可配置**：当前 `training/train_models.py --task ball` 实际写死为 `YOLO("yolo11s.pt")`，并非从现有 `models/weights/ball-detection.pt` 继续微调。正式训练前增加 `--weights`（或同义）参数，并把首选起点设为现有专用球权重；若权重架构/类别不兼容，再保留 `yolo11s.pt` 从通用预训练开始的对照实验。禁止在没记录起点的情况下混报结果。
+2. **最终数据集收口**：让构建/finalize 工具自动生成 `data.yaml`，并让 validator 把 `source` 当场次字段校验 unseen test；Roboflow 导出后也要恢复并验证 `manifest.csv`，不能因为平台导出丢失来源信息而放弃防泄漏检查。
+
+完成后先在本机做语法、参数和数据验证，不在本机实际跑 200 epochs：
+
+```powershell
+.\.venv\Scripts\python.exe -m training.prepare_dataset validate `
+  --task ball `
+  --data eval/finetune_dataset/ball_final/data.yaml `
+  --report eval/finetune_dataset/ball_final/validation.json
+```
+
+验证规则：`errors` 必须为空；数据量、split 比例、未见场次等 `warnings` 必须逐项解释或消除，不能直接忽略。
+
+### 12.6 Roboflow 可选流程（只用于网页精修/版本管理）
+
+#### 路线 A：不用 API（首选的简单流程）
+
+1. 在 Roboflow 创建 private `Object Detection` 项目，类别只建 `ball`。
+2. 上传 `ball_final` 的图片和 YOLO 标签；按 `source` 分 batch/tag，避免后续混淆场次。
+3. 在网页中逐图检查：真球框是否贴合，空标签 hard negative 是否确实没有球，是否存在一图多框/漏框。
+4. 创建固定 dataset version。预处理只做 auto-orient；不要 stretch 改变宽高比。训练侧统一使用 `imgsz=1280`，数据版本中不要重复叠加激进增强。
+5. 导出 Ultralytics YOLO 格式 ZIP。以 Roboflow 导出页面生成的下载代码/格式名为准，不手写易变的 format slug。
+
+#### 路线 B：用 Python API 自动上传
+
+API key 只放私有环境变量，不写进脚本、计划、日志或 Git：
+
+```powershell
+$env:ROBOFLOW_API_KEY = "<private-key>"
+```
+
+Python SDK 示例：
+
+```python
+import os
+from roboflow import Roboflow
+
+rf = Roboflow(api_key=os.environ["ROBOFLOW_API_KEY"])
+workspace = rf.workspace("<workspace-id>")
+workspace.upload_dataset(
+    "eval/finetune_dataset/ball_final",
+    "football-ball",
+    project_type="object-detection",
+    num_workers=10,
+)
+```
+
+需要自动导出时，在 Roboflow 网页先生成一个固定 version，再使用该版本 Export 页面给出的 Python/CLI 代码。私有下载代码通常包含密钥，禁止粘贴进仓库或公开聊天。
+
+Roboflow 导出 ZIP 下载回本地/云机后：
+
+```powershell
+.\.venv\Scripts\python.exe -m training.prepare_dataset unpack `
+  --zip roboflow-export.zip `
+  --output-dir training-data/ball-yolo
+```
+
+随后把 provenance 对应的 `manifest.csv` 放回导出根目录并核对文件名映射，再执行 `validate`。若 Roboflow 改了文件名且无法可靠恢复 `source_video/source/split`，该导出不得用于正式训练，只能回到本地原始数据集重新 finalize。
+
+### 12.7 CUDA 云机配置与上传
+
+建议配置：Ubuntu 22.04、Python 3.11、NVIDIA GPU 显存至少 16GB（A10/A5000/RTX 3090/4090 级别均可）、磁盘至少 50GB。`imgsz=1280` 较吃显存，首次用 `batch=4`；确认显存余量后再升到 8。租用机器时不需要桌面环境，SSH 即可。
+
+云机只需上传以下内容：
+
+- 仓库代码；
+- `training-data/ball-yolo/`（或直接使用已校验的 `ball_final/`）；
+- 已确认的起始权重，例如 `models/weights/ball-detection.pt`；
+- 不上传原始长视频，除非云机还要重新抽帧。
+
+Linux 云机初始化：
+
+```bash
+python3.11 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+python -c "import torch; print(torch.__version__, torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+```
+
+最后一行必须显示 `True` 和正确 GPU 名称。若为 `False`，先按云机 CUDA 镜像对应版本重装 PyTorch，不能退回 CPU 硬跑训练。
+
+### 12.8 云机训练、产物与回传
+
+完成 §12.5 的 `--weights` 收口后，正式命令形态为：
+
+```bash
+python -m training.prepare_dataset validate \
+  --task ball \
+  --data training-data/ball-yolo/data.yaml \
+  --report training-data/ball-yolo/validation.json
+
+python -m training.train_models \
+  --task ball \
+  --data training-data/ball-yolo/data.yaml \
+  --weights models/weights/ball-detection.pt \
+  --device 0 \
+  --batch 4 \
+  --epochs 200
+```
+
+当前脚本尚未实现 `--weights`，所以在 §12.5 完成前不要照抄第二条命令。若显存溢出，依次把 batch 从 4 降到 2/1；不要先降低 `imgsz=1280`，否则会直接伤害远场小球尺度。训练使用 early stopping（当前 patience=40）。
+
+需要回传并归档：
+
+```text
+runs/xbotgo/xbotgo-ball/weights/best.pt
+runs/xbotgo/xbotgo-ball/weights/last.pt
+runs/xbotgo/xbotgo-ball/training_result.json
+runs/xbotgo/xbotgo-ball/results.csv
+runs/xbotgo/xbotgo-ball/*.png
+runs/xbotgo/xbotgo-ball/weights/best_openvino_model/   # 若导出成功
+training-data/ball-yolo/validation.json
+```
+
+把整个 run 目录压缩下载回本机，先放进独立候选目录，例如 `models/candidates/ball-YYYYMMDD/`；**不要直接覆盖** `models/weights/ball-detection.pt`。若同名 run 已存在，Ultralytics 可能自动生成 `xbotgo-ball2` 等目录，归档时以控制台输出和 `training_result.json` 所在的实际 `save_dir` 为准。
+
+### 12.9 本地验收与 promote 门
+
+按以下顺序验收，任一硬门失败即保留报告、不替换生产权重：
+
+1. **模型结构门**：单类名称必须为 `ball`；PT 可加载；OpenVINO FP16 1280 dynamic 可在 `intel:GPU/NPU/CPU` 至少完成短片冒烟。
+2. **未见场次模型门**：hold-out 可见球 recall ≥75%、precision ≥90%；同时报告关键帧/插值帧、IoU 和中心命中两套口径。
+3. **相对基线门**：每个 source 单独报告，新模型在 hold-out 不得低于旧模型；禁止只用汇总平均值掩盖某个球场回退。
+4. **误检门**：pilot 20 项与新挖 hard negatives 全量重放；可见 confirmed 假球不得高于当前门控链路。
+5. **跟踪门**：使用相同 `BallTracker` 参数重放，比较断段率、虚接率、确认延迟与 possession 错配；不能只看 detector mAP。
+6. **端到端门**：正式 6 视频回放，referee/队色/球场标定等旧回归不退；处理速度下降 ≤20%；项目全量 pytest 通过。
+7. **组合门**：分别评估“新权重 + 原跟踪器”和“新权重 + L1+L2 (`1.2/2.2`)”。只有扩大 GT 和 hold-out 都支持时才允许把 L1+L2 从 opt-in 改为默认。
+
+最终 promote 采用人工、可回退操作：先备份旧 `.pt` 与 OpenVINO 目录，再替换 `models/weights/`；记录旧/新 SHA-256、训练 run、数据 version、指标与回退命令。训练脚本本身继续保持 `promoted=false`，不得自动上线。
+
+### 12.10 一页执行清单
+
+1. `[ ]` 完成 demo4 剩余标注与三个异常框复核；
+2. `[ ]` 补齐至少 4 场、600 独立球正样本、300 人工硬负样本；
+3. `[ ]` 固定 source-level train/val/test 和未见 hold-out；
+4. `[ ]` 重新生成 `frames_gt.jsonl` 与 `ball_final`；
+5. `[ ]` `dataset_status.json` 显示 `train_ready=true`；
+6. `[ ]` 完成 `data.yaml`/manifest finalize 与 `--weights` 代码收口；
+7. `[ ]` 本地 validator `errors=[]`；
+8. `[ ]` 可选 Roboflow 网页精修并导出固定版本；
+9. `[ ]` CUDA 云机 GPU 自检通过，执行训练；
+10. `[ ]` 下载候选权重和完整 run，不覆盖生产模型；
+11. `[ ]` hold-out、FP、track、端到端、速度、pytest 全部门通过；
+12. `[ ]` 记录 SHA/指标/数据版本，备份旧权重后人工 promote。
+
+### 12.11 相关文档入口
+
+- 本仓库训练与校验说明：`training/README.md`
+- 本仓库训练入口：`training/train_models.py`
+- 本仓库数据校验/Roboflow 解包入口：`training/prepare_dataset.py`
+- Roboflow 官方上传数据说明：https://docs.roboflow.com/developer/upload-a-dataset
+- Roboflow 官方导出数据说明：https://docs.roboflow.com/developer/export-data
+- Roboflow 官方 Python SDK 训练说明（仅评估 Hosted Training 路线时使用）：https://docs.roboflow.com/developer/python-sdk/train-a-model

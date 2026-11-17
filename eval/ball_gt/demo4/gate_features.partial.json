@@ -1,0 +1,2246 @@
+{
+  "true_candidates": {
+    "samples": 132,
+    "player_distance_ratio": {
+      "n": 132,
+      "min": 0.0522,
+      "p10": 0.1102,
+      "median": 0.2331,
+      "mean": 0.2664,
+      "p90": 0.448,
+      "max": 1.0101
+    },
+    "size_factor": {
+      "n": 132,
+      "min": 1.0007,
+      "p10": 1.0319,
+      "median": 1.2301,
+      "mean": 1.2572,
+      "p90": 1.486,
+      "max": 2.0806
+    },
+    "player_count": {
+      "n": 132,
+      "min": 4.0,
+      "p10": 9.1,
+      "median": 12.0,
+      "mean": 12.0909,
+      "p90": 15.0,
+      "max": 17.0
+    },
+    "details": [
+      {
+        "frame": 690,
+        "bbox": [
+          1405.673,
+          238.825,
+          1409.841,
+          242.993
+        ],
+        "player_distance_ratio": 0.6702296510485883,
+        "player_distance_px": 116.24295510373955,
+        "candidate_size_px": 4.1679999999999495,
+        "expected_size_px": 8.671875,
+        "size_factor": 2.0805842130518486,
+        "player_count": 4
+      },
+      {
+        "frame": 952,
+        "bbox": [
+          719.25,
+          383.625,
+          732.75,
+          396.375
+        ],
+        "player_distance_ratio": 0.13253341081074801,
+        "player_distance_px": 27.210765907081704,
+        "candidate_size_px": 13.119641763401926,
+        "expected_size_px": 10.265625,
+        "size_factor": 1.2780168536647234,
+        "player_count": 10
+      },
+      {
+        "frame": 1008,
+        "bbox": [
+          1059.375,
+          367.875,
+          1070.625,
+          379.125
+        ],
+        "player_distance_ratio": 0.18084989096524431,
+        "player_distance_px": 31.705246509844393,
+        "candidate_size_px": 11.25,
+        "expected_size_px": 8.765625,
+        "size_factor": 1.2834224598930482,
+        "player_count": 14
+      },
+      {
+        "frame": 1010,
+        "bbox": [
+          1076.25,
+          359.625,
+          1086.75,
+          369.375
+        ],
+        "player_distance_ratio": 0.11782679512901999,
+        "player_distance_px": 20.656510021056317,
+        "candidate_size_px": 10.11805317242403,
+        "expected_size_px": 8.765625,
+        "size_factor": 1.1542877059449874,
+        "player_count": 14
+      },
+      {
+        "frame": 1023,
+        "bbox": [
+          1169.25,
+          357.75,
+          1178.25,
+          366.75
+        ],
+        "player_distance_ratio": 0.1585019415424294,
+        "player_distance_px": 29.124731758421397,
+        "candidate_size_px": 9.0,
+        "expected_size_px": 9.1875,
+        "size_factor": 1.0208333333333333,
+        "player_count": 13
+      },
+      {
+        "frame": 1027,
+        "bbox": [
+          1203.0,
+          343.875,
+          1213.5,
+          355.125
+        ],
+        "player_distance_ratio": 0.18012422360248448,
+        "player_distance_px": 27.1875,
+        "candidate_size_px": 10.868532559642079,
+        "expected_size_px": 7.546875,
+        "size_factor": 1.440136819497087,
+        "player_count": 14
+      },
+      {
+        "frame": 1043,
+        "bbox": [
+          1321.125,
+          339.75,
+          1330.875,
+          348.75
+        ],
+        "player_distance_ratio": 0.29482570195531477,
+        "player_distance_px": 43.947456197714104,
+        "candidate_size_px": 9.367496997597597,
+        "expected_size_px": 7.453125,
+        "size_factor": 1.2568549430738913,
+        "player_count": 14
+      },
+      {
+        "frame": 1044,
+        "bbox": [
+          1332.75,
+          341.812,
+          1341.75,
+          349.688
+        ],
+        "player_distance_ratio": 0.31382375173289606,
+        "player_distance_px": 49.72145066518072,
+        "candidate_size_px": 8.41926362575729,
+        "expected_size_px": 7.921875,
+        "size_factor": 1.0627867298786322,
+        "player_count": 15
+      },
+      {
+        "frame": 1046,
+        "bbox": [
+          1340.625,
+          341.25,
+          1350.375,
+          351.0
+        ],
+        "player_distance_ratio": 0.2652986826266957,
+        "player_distance_px": 42.28197754362963,
+        "candidate_size_px": 9.75,
+        "expected_size_px": 7.96875,
+        "size_factor": 1.223529411764706,
+        "player_count": 16
+      },
+      {
+        "frame": 1049,
+        "bbox": [
+          1361.25,
+          336.562,
+          1371.75,
+          345.938
+        ],
+        "player_distance_ratio": 0.1452738733217236,
+        "player_distance_px": 23.153023560649697,
+        "candidate_size_px": 9.922096552644494,
+        "expected_size_px": 7.96875,
+        "size_factor": 1.2451258419004854,
+        "player_count": 14
+      },
+      {
+        "frame": 1057,
+        "bbox": [
+          1330.5,
+          330.188,
+          1339.5,
+          338.812
+        ],
+        "player_distance_ratio": 0.1302161664310542,
+        "player_distance_px": 19.532424964658126,
+        "candidate_size_px": 8.809994324629285,
+        "expected_size_px": 7.5,
+        "size_factor": 1.1746659099505714,
+        "player_count": 12
+      },
+      {
+        "frame": 1073,
+        "bbox": [
+          1052.829,
+          334.688,
+          1059.498,
+          341.357
+        ],
+        "player_distance_ratio": 0.15416180469868634,
+        "player_distance_px": 20.956370326227674,
+        "candidate_size_px": 6.669000000000068,
+        "expected_size_px": 6.796875,
+        "size_factor": 1.0191745389113707,
+        "player_count": 10
+      },
+      {
+        "frame": 1075,
+        "bbox": [
+          1030.92,
+          332.187,
+          1037.693,
+          338.856
+        ],
+        "player_distance_ratio": 0.4417179916644905,
+        "player_distance_px": 86.5491189917611,
+        "candidate_size_px": 6.720798836447888,
+        "expected_size_px": 9.796875,
+        "size_factor": 1.4576950208463457,
+        "player_count": 10
+      },
+      {
+        "frame": 1118,
+        "bbox": [
+          1008.648,
+          320.308,
+          1015.317,
+          326.56
+        ],
+        "player_distance_ratio": 0.245342794249053,
+        "player_distance_px": 30.821188527537284,
+        "candidate_size_px": 6.457134658654716,
+        "expected_size_px": 6.28125,
+        "size_factor": 1.0280015376962732,
+        "player_count": 8
+      },
+      {
+        "frame": 1120,
+        "bbox": [
+          1023.236,
+          320.1,
+          1030.739,
+          325.935
+        ],
+        "player_distance_ratio": 0.2589109014829048,
+        "player_distance_px": 32.28295302864969,
+        "candidate_size_px": 6.6166460537042555,
+        "expected_size_px": 6.234375,
+        "size_factor": 1.061316660243289,
+        "player_count": 9
+      },
+      {
+        "frame": 1121,
+        "bbox": [
+          1028.238,
+          319.475,
+          1035.74,
+          325.727
+        ],
+        "player_distance_ratio": 0.2876267510843998,
+        "player_distance_px": 39.36891155467722,
+        "candidate_size_px": 6.848540282425105,
+        "expected_size_px": 6.84375,
+        "size_factor": 1.0006999499433944,
+        "player_count": 11
+      },
+      {
+        "frame": 1122,
+        "bbox": [
+          1032.587,
+          319.892,
+          1038.11,
+          325.31
+        ],
+        "player_distance_ratio": 0.30062346700838355,
+        "player_distance_px": 41.42967154709286,
+        "candidate_size_px": 5.4702480748133855,
+        "expected_size_px": 6.890625,
+        "size_factor": 1.2596549380870756,
+        "player_count": 12
+      },
+      {
+        "frame": 1123,
+        "bbox": [
+          1032.587,
+          319.892,
+          1038.11,
+          325.31
+        ],
+        "player_distance_ratio": 0.41837860702559393,
+        "player_distance_px": 56.088882004368685,
+        "candidate_size_px": 5.4702480748133855,
+        "expected_size_px": 6.703125,
+        "size_factor": 1.2253786132411688,
+        "player_count": 13
+      },
+      {
+        "frame": 1124,
+        "bbox": [
+          1035.74,
+          319.892,
+          1041.575,
+          325.31
+        ],
+        "player_distance_ratio": 0.4492296025134095,
+        "player_distance_px": 57.69792707281603,
+        "candidate_size_px": 5.622635503035942,
+        "expected_size_px": 6.421875,
+        "size_factor": 1.1421467737918471,
+        "player_count": 10
+      },
+      {
+        "frame": 1126,
+        "bbox": [
+          1048.661,
+          319.683,
+          1055.33,
+          325.518
+        ],
+        "player_distance_ratio": 0.3950311515852496,
+        "player_distance_px": 80.36414990062421,
+        "candidate_size_px": 6.238077828946918,
+        "expected_size_px": 10.171875,
+        "size_factor": 1.6306104667048,
+        "player_count": 10
+      },
+      {
+        "frame": 1133,
+        "bbox": [
+          1060.875,
+          317.062,
+          1069.125,
+          324.938
+        ],
+        "player_distance_ratio": 0.2376758210638334,
+        "player_distance_px": 31.194951514628134,
+        "candidate_size_px": 8.060831222646943,
+        "expected_size_px": 6.5625,
+        "size_factor": 1.228317138689058,
+        "player_count": 15
+      },
+      {
+        "frame": 1136,
+        "bbox": [
+          1066.875,
+          316.312,
+          1075.125,
+          324.188
+        ],
+        "player_distance_ratio": 0.2775377792930383,
+        "player_distance_px": 33.82491685133904,
+        "candidate_size_px": 8.060831222646943,
+        "expected_size_px": 6.09375,
+        "size_factor": 1.3228030724343702,
+        "player_count": 13
+      },
+      {
+        "frame": 1142,
+        "bbox": [
+          1075.257,
+          316.349,
+          1084.218,
+          323.851
+        ],
+        "player_distance_ratio": 0.19221611357684623,
+        "player_distance_px": 25.588770119917655,
+        "candidate_size_px": 8.199111049376034,
+        "expected_size_px": 6.65625,
+        "size_factor": 1.2317913313616577,
+        "player_count": 15
+      },
+      {
+        "frame": 1145,
+        "bbox": [
+          1077.75,
+          315.562,
+          1086.75,
+          323.438
+        ],
+        "player_distance_ratio": 0.1827431578155392,
+        "player_distance_px": 24.67032630509779,
+        "candidate_size_px": 8.41926362575729,
+        "expected_size_px": 6.75,
+        "size_factor": 1.247298314927006,
+        "player_count": 14
+      },
+      {
+        "frame": 1149,
+        "bbox": [
+          1071.0,
+          315.0,
+          1078.5,
+          321.75
+        ],
+        "player_distance_ratio": 0.15151700848777275,
+        "player_distance_px": 19.744560168562884,
+        "candidate_size_px": 7.115124735378854,
+        "expected_size_px": 6.515625,
+        "size_factor": 1.0920095517128217,
+        "player_count": 15
+      },
+      {
+        "frame": 1167,
+        "bbox": [
+          1086.823,
+          315.098,
+          1095.159,
+          322.601
+        ],
+        "player_distance_ratio": 0.3223209306073298,
+        "player_distance_px": 40.793742779990176,
+        "candidate_size_px": 7.9085401939928195,
+        "expected_size_px": 6.328125,
+        "size_factor": 1.249744623248248,
+        "player_count": 14
+      },
+      {
+        "frame": 1176,
+        "bbox": [
+          1078.279,
+          314.056,
+          1085.781,
+          321.142
+        ],
+        "player_distance_ratio": 0.2618015941934318,
+        "player_distance_px": 31.416191303211818,
+        "candidate_size_px": 7.291033671572212,
+        "expected_size_px": 6.0,
+        "size_factor": 1.2151722785953687,
+        "player_count": 13
+      },
+      {
+        "frame": 1185,
+        "bbox": [
+          1059.498,
+          315.307,
+          1066.166,
+          321.559
+        ],
+        "player_distance_ratio": 0.44871591540923367,
+        "player_distance_px": 88.34094584619288,
+        "candidate_size_px": 6.456650524846408,
+        "expected_size_px": 9.84375,
+        "size_factor": 1.5245908017042884,
+        "player_count": 11
+      },
+      {
+        "frame": 1189,
+        "bbox": [
+          1019.902,
+          315.307,
+          1027.404,
+          321.559
+        ],
+        "player_distance_ratio": 0.32756635226910713,
+        "player_distance_px": 39.307962272292855,
+        "candidate_size_px": 6.8485402824251365,
+        "expected_size_px": 6.0,
+        "size_factor": 1.1414233804041893,
+        "player_count": 13
+      },
+      {
+        "frame": 1192,
+        "bbox": [
+          1000.125,
+          314.062,
+          1006.875,
+          320.438
+        ],
+        "player_distance_ratio": 0.3111992820385186,
+        "player_distance_px": 63.017854612800015,
+        "candidate_size_px": 6.560335357281657,
+        "expected_size_px": 10.125,
+        "size_factor": 1.5433662226980114,
+        "player_count": 14
+      },
+      {
+        "frame": 1196,
+        "bbox": [
+          948.63,
+          314.473,
+          955.298,
+          320.725
+        ],
+        "player_distance_ratio": 0.2640302884170689,
+        "player_distance_px": 49.010622287418414,
+        "candidate_size_px": 6.456650524846463,
+        "expected_size_px": 9.28125,
+        "size_factor": 1.437471327321174,
+        "player_count": 12
+      },
+      {
+        "frame": 1209,
+        "bbox": [
+          830.676,
+          311.139,
+          838.179,
+          317.391
+        ],
+        "player_distance_ratio": 0.29563103953824194,
+        "player_distance_px": 57.64805270995718,
+        "candidate_size_px": 6.848996714848068,
+        "expected_size_px": 9.75,
+        "size_factor": 1.4235661668318211,
+        "player_count": 13
+      },
+      {
+        "frame": 1222,
+        "bbox": [
+          749.609,
+          308.221,
+          757.528,
+          315.307
+        ],
+        "player_distance_ratio": 0.32160266523454534,
+        "player_distance_px": 60.90350472879202,
+        "candidate_size_px": 7.490930115813388,
+        "expected_size_px": 9.46875,
+        "size_factor": 1.2640286124164242,
+        "player_count": 12
+      },
+      {
+        "frame": 1228,
+        "bbox": [
+          727.125,
+          306.75,
+          733.875,
+          314.25
+        ],
+        "player_distance_ratio": 0.3242378662430056,
+        "player_distance_px": 57.75486992453537,
+        "candidate_size_px": 7.115124735378854,
+        "expected_size_px": 8.90625,
+        "size_factor": 1.2517349071499835,
+        "player_count": 12
+      },
+      {
+        "frame": 1231,
+        "bbox": [
+          718.975,
+          304.262,
+          725.643,
+          310.93
+        ],
+        "player_distance_ratio": 0.3152194609306075,
+        "player_distance_px": 56.739502967509345,
+        "candidate_size_px": 6.668000000000006,
+        "expected_size_px": 9.0,
+        "size_factor": 1.3497300539892008,
+        "player_count": 13
+      },
+      {
+        "frame": 1273,
+        "bbox": [
+          746.692,
+          295.509,
+          753.777,
+          301.344
+        ],
+        "player_distance_ratio": 0.3211964011553193,
+        "player_distance_px": 58.71871708620681,
+        "candidate_size_px": 6.4296947828026845,
+        "expected_size_px": 9.140625,
+        "size_factor": 1.4216265792970704,
+        "player_count": 9
+      },
+      {
+        "frame": 1280,
+        "bbox": [
+          746.066,
+          295.092,
+          751.902,
+          300.927
+        ],
+        "player_distance_ratio": 0.346537197572667,
+        "player_distance_px": 60.10254520400943,
+        "candidate_size_px": 5.835499978579409,
+        "expected_size_px": 8.671875,
+        "size_factor": 1.4860551849596744,
+        "player_count": 8
+      },
+      {
+        "frame": 1286,
+        "bbox": [
+          748.567,
+          294.884,
+          754.402,
+          300.302
+        ],
+        "player_distance_ratio": 0.3313452356891705,
+        "player_distance_px": 47.2166960857068,
+        "candidate_size_px": 5.622635503035942,
+        "expected_size_px": 7.125,
+        "size_factor": 1.267199340265407,
+        "player_count": 12
+      },
+      {
+        "frame": 1305,
+        "bbox": [
+          768.157,
+          292.383,
+          773.992,
+          297.801
+        ],
+        "player_distance_ratio": 0.32032519266037535,
+        "player_distance_px": 51.95274218460463,
+        "candidate_size_px": 5.6226355030358866,
+        "expected_size_px": 8.109375,
+        "size_factor": 1.442272933328405,
+        "player_count": 9
+      },
+      {
+        "frame": 1662,
+        "bbox": [
+          1090.5,
+          306.375,
+          1098.0,
+          313.875
+        ],
+        "player_distance_ratio": 0.5090279474715467,
+        "player_distance_px": 56.311216689039846,
+        "candidate_size_px": 7.5,
+        "expected_size_px": 5.53125,
+        "size_factor": 1.3559322033898304,
+        "player_count": 11
+      },
+      {
+        "frame": 1666,
+        "bbox": [
+          1089.011,
+          329.061,
+          1097.139,
+          336.147
+        ],
+        "player_distance_ratio": 0.5939590517307954,
+        "player_distance_px": 65.70672009771924,
+        "candidate_size_px": 7.589137500401452,
+        "expected_size_px": 5.53125,
+        "size_factor": 1.3720474576996975,
+        "player_count": 12
+      },
+      {
+        "frame": 1667,
+        "bbox": [
+          1089.845,
+          325.518,
+          1097.139,
+          332.187
+        ],
+        "player_distance_ratio": 0.20510121536907575,
+        "player_distance_px": 22.497039560795496,
+        "candidate_size_px": 6.974502562907222,
+        "expected_size_px": 5.484375,
+        "size_factor": 1.2717041710144223,
+        "player_count": 13
+      },
+      {
+        "frame": 1668,
+        "bbox": [
+          1088.907,
+          321.767,
+          1097.243,
+          329.27
+        ],
+        "player_distance_ratio": 0.18202066922299226,
+        "player_distance_px": 20.13603653279352,
+        "candidate_size_px": 7.9085401939928195,
+        "expected_size_px": 5.53125,
+        "size_factor": 1.4297925774450295,
+        "player_count": 10
+      },
+      {
+        "frame": 1669,
+        "bbox": [
+          1089.115,
+          319.266,
+          1097.451,
+          326.769
+        ],
+        "player_distance_ratio": 0.17120034633741332,
+        "player_distance_px": 18.778537988885024,
+        "candidate_size_px": 7.9085401939928195,
+        "expected_size_px": 5.484375,
+        "size_factor": 1.4420130268249016,
+        "player_count": 11
+      },
+      {
+        "frame": 1670,
+        "bbox": [
+          1089.75,
+          316.875,
+          1098.75,
+          325.125
+        ],
+        "player_distance_ratio": 0.16453823932763267,
+        "player_distance_px": 18.04778812624971,
+        "candidate_size_px": 8.616843969807043,
+        "expected_size_px": 5.484375,
+        "size_factor": 1.5711624332411702,
+        "player_count": 11
+      },
+      {
+        "frame": 1673,
+        "bbox": [
+          1090.47,
+          312.389,
+          1098.181,
+          319.475
+        ],
+        "player_distance_ratio": 0.16029517480688865,
+        "player_distance_px": 17.5823769866306,
+        "candidate_size_px": 7.3918973207154455,
+        "expected_size_px": 5.484375,
+        "size_factor": 1.3478103376803092,
+        "player_count": 15
+      },
+      {
+        "frame": 1677,
+        "bbox": [
+          1090.887,
+          311.764,
+          1099.431,
+          319.266
+        ],
+        "player_distance_ratio": 0.18438933589354536,
+        "player_distance_px": 19.87947527602286,
+        "candidate_size_px": 8.006065700454926,
+        "expected_size_px": 5.390625,
+        "size_factor": 1.4851832024032325,
+        "player_count": 13
+      },
+      {
+        "frame": 1680,
+        "bbox": [
+          1092.375,
+          314.25,
+          1100.625,
+          321.75
+        ],
+        "player_distance_ratio": 0.18419972664310053,
+        "player_distance_px": 21.24053097853253,
+        "candidate_size_px": 7.866066361276137,
+        "expected_size_px": 5.765625,
+        "size_factor": 1.3643041927416606,
+        "player_count": 14
+      },
+      {
+        "frame": 1683,
+        "bbox": [
+          1090.47,
+          321.767,
+          1099.848,
+          330.103
+        ],
+        "player_distance_ratio": 0.23611385488391878,
+        "player_distance_px": 24.570598023857798,
+        "candidate_size_px": 8.841663191956563,
+        "expected_size_px": 5.203125,
+        "size_factor": 1.6992986314871472,
+        "player_count": 11
+      },
+      {
+        "frame": 1687,
+        "bbox": [
+          1090.574,
+          338.231,
+          1099.327,
+          346.983
+        ],
+        "player_distance_ratio": 0.3339961032009919,
+        "player_distance_px": 37.261440263360655,
+        "candidate_size_px": 8.752499985718336,
+        "expected_size_px": 5.578125,
+        "size_factor": 1.5690756276918025,
+        "player_count": 11
+      },
+      {
+        "frame": 1688,
+        "bbox": [
+          1090.678,
+          336.98,
+          1098.806,
+          344.899
+        ],
+        "player_distance_ratio": 0.32172574462662507,
+        "player_distance_px": 36.19414627049532,
+        "candidate_size_px": 8.022819454530888,
+        "expected_size_px": 5.625,
+        "size_factor": 1.4262790141388244,
+        "player_count": 12
+      },
+      {
+        "frame": 1694,
+        "bbox": [
+          1093.125,
+          326.25,
+          1099.875,
+          333.0
+        ],
+        "player_distance_ratio": 0.3220624517664179,
+        "player_distance_px": 34.42042453253591,
+        "candidate_size_px": 6.75,
+        "expected_size_px": 5.34375,
+        "size_factor": 1.263157894736842,
+        "player_count": 12
+      },
+      {
+        "frame": 1698,
+        "bbox": [
+          1092.75,
+          327.562,
+          1100.25,
+          335.438
+        ],
+        "player_distance_ratio": 0.3576277944937448,
+        "player_distance_px": 84.8248425064851,
+        "candidate_size_px": 7.685701009016667,
+        "expected_size_px": 11.859375,
+        "size_factor": 1.543044022410823,
+        "player_count": 12
+      },
+      {
+        "frame": 1701,
+        "bbox": [
+          1092.375,
+          334.125,
+          1100.625,
+          342.375
+        ],
+        "player_distance_ratio": 0.31067686974351677,
+        "player_distance_px": 76.60126569613585,
+        "candidate_size_px": 8.25,
+        "expected_size_px": 12.328125,
+        "size_factor": 1.4943181818181819,
+        "player_count": 11
+      },
+      {
+        "frame": 1703,
+        "bbox": [
+          1094.25,
+          339.562,
+          1101.75,
+          347.438
+        ],
+        "player_distance_ratio": 0.2803541624260123,
+        "player_distance_px": 63.605350600401536,
+        "candidate_size_px": 7.685701009016667,
+        "expected_size_px": 11.34375,
+        "size_factor": 1.4759551518712222,
+        "player_count": 11
+      },
+      {
+        "frame": 1707,
+        "bbox": [
+          1093.875,
+          340.5,
+          1102.125,
+          348.75
+        ],
+        "player_distance_ratio": 0.25655266700519036,
+        "player_distance_px": 56.28124132426363,
+        "candidate_size_px": 8.25,
+        "expected_size_px": 10.96875,
+        "size_factor": 1.3295454545454546,
+        "player_count": 10
+      },
+      {
+        "frame": 1709,
+        "bbox": [
+          1095.375,
+          339.562,
+          1103.625,
+          347.438
+        ],
+        "player_distance_ratio": 0.24099533057883227,
+        "player_distance_px": 52.868350645731326,
+        "candidate_size_px": 8.060831222646943,
+        "expected_size_px": 10.96875,
+        "size_factor": 1.3607467638304156,
+        "player_count": 10
+      },
+      {
+        "frame": 1711,
+        "bbox": [
+          1095.375,
+          339.0,
+          1103.625,
+          347.25
+        ],
+        "player_distance_ratio": 0.23521988662043097,
+        "player_distance_px": 49.61669483399716,
+        "candidate_size_px": 8.25,
+        "expected_size_px": 10.546875,
+        "size_factor": 1.2784090909090908,
+        "player_count": 12
+      },
+      {
+        "frame": 1713,
+        "bbox": [
+          1095.375,
+          341.25,
+          1103.625,
+          348.75
+        ],
+        "player_distance_ratio": 0.22094668951912466,
+        "player_distance_px": 45.155979670471105,
+        "candidate_size_px": 7.866066361276137,
+        "expected_size_px": 10.21875,
+        "size_factor": 1.2990927778471195,
+        "player_count": 11
+      },
+      {
+        "frame": 1767,
+        "bbox": [
+          1066.875,
+          339.562,
+          1075.125,
+          347.438
+        ],
+        "player_distance_ratio": 0.0718954248366013,
+        "player_distance_px": 10.3125,
+        "candidate_size_px": 8.060831222646943,
+        "expected_size_px": 7.171875,
+        "size_factor": 1.1239503229834518,
+        "player_count": 10
+      },
+      {
+        "frame": 1768,
+        "bbox": [
+          1071.297,
+          339.064,
+          1078.175,
+          346.15
+        ],
+        "player_distance_ratio": 0.09223430092185564,
+        "player_distance_px": 13.14338788136443,
+        "candidate_size_px": 6.9812253938688436,
+        "expected_size_px": 7.125,
+        "size_factor": 1.0205944655872914,
+        "player_count": 9
+      },
+      {
+        "frame": 1769,
+        "bbox": [
+          1073.277,
+          338.647,
+          1081.613,
+          346.567
+        ],
+        "player_distance_ratio": 0.10179115559393309,
+        "player_distance_px": 14.886956505612714,
+        "candidate_size_px": 8.12533814680966,
+        "expected_size_px": 7.3125,
+        "size_factor": 1.1111573534098682,
+        "player_count": 9
+      },
+      {
+        "frame": 1771,
+        "bbox": [
+          1080.0,
+          339.0,
+          1087.5,
+          346.5
+        ],
+        "player_distance_ratio": 0.1474488104525521,
+        "player_distance_px": 20.873222229689407,
+        "candidate_size_px": 7.5,
+        "expected_size_px": 7.078125,
+        "size_factor": 1.0596026490066226,
+        "player_count": 10
+      },
+      {
+        "frame": 1772,
+        "bbox": [
+          1083.0,
+          338.625,
+          1092.0,
+          346.875
+        ],
+        "player_distance_ratio": 0.15969202613116457,
+        "player_distance_px": 21.558423527707216,
+        "candidate_size_px": 8.616843969807043,
+        "expected_size_px": 6.75,
+        "size_factor": 1.2765694770084508,
+        "player_count": 10
+      },
+      {
+        "frame": 1773,
+        "bbox": [
+          1086.406,
+          339.273,
+          1093.492,
+          346.775
+        ],
+        "player_distance_ratio": 0.18131825275401112,
+        "player_distance_px": 24.13799239787773,
+        "candidate_size_px": 7.291033671572212,
+        "expected_size_px": 6.65625,
+        "size_factor": 1.0953665609873746,
+        "player_count": 10
+      },
+      {
+        "frame": 1775,
+        "bbox": [
+          1091.408,
+          338.856,
+          1100.161,
+          347.192
+        ],
+        "player_distance_ratio": 0.19275806324079153,
+        "player_distance_px": 25.48020648464213,
+        "candidate_size_px": 8.541955747953827,
+        "expected_size_px": 6.609375,
+        "size_factor": 1.2923999240402952,
+        "player_count": 8
+      },
+      {
+        "frame": 1778,
+        "bbox": [
+          1098.806,
+          338.647,
+          1106.517,
+          346.567
+        ],
+        "player_distance_ratio": 0.21017706169472028,
+        "player_distance_px": 26.994616361415638,
+        "candidate_size_px": 7.814801341045095,
+        "expected_size_px": 6.421875,
+        "size_factor": 1.216903371841572,
+        "player_count": 8
+      },
+      {
+        "frame": 1780,
+        "bbox": [
+          1104.745,
+          338.856,
+          1113.081,
+          347.192
+        ],
+        "player_distance_ratio": 0.1663034629699476,
+        "player_distance_px": 25.257338438560794,
+        "candidate_size_px": 8.336000000000013,
+        "expected_size_px": 7.59375,
+        "size_factor": 1.09774485596708,
+        "player_count": 9
+      },
+      {
+        "frame": 1783,
+        "bbox": [
+          1119.333,
+          339.481,
+          1127.252,
+          347.4
+        ],
+        "player_distance_ratio": 0.19445410913297956,
+        "player_distance_px": 30.26192073381994,
+        "candidate_size_px": 7.918999999999926,
+        "expected_size_px": 7.78125,
+        "size_factor": 1.0177028112449704,
+        "player_count": 10
+      },
+      {
+        "frame": 1788,
+        "bbox": [
+          1143.75,
+          339.188,
+          1152.75,
+          347.812
+        ],
+        "player_distance_ratio": 0.212088372211848,
+        "player_distance_px": 30.819091587034166,
+        "candidate_size_px": 8.809994324629285,
+        "expected_size_px": 7.265625,
+        "size_factor": 1.2125583586586544,
+        "player_count": 10
+      },
+      {
+        "frame": 1792,
+        "bbox": [
+          1162.875,
+          339.188,
+          1171.125,
+          347.812
+        ],
+        "player_distance_ratio": 0.2518226243734694,
+        "player_distance_px": 38.71772849742092,
+        "candidate_size_px": 8.43492738557957,
+        "expected_size_px": 7.6875,
+        "size_factor": 1.0972263265794562,
+        "player_count": 8
+      },
+      {
+        "frame": 1794,
+        "bbox": [
+          1170.703,
+          341.565,
+          1178.831,
+          348.651
+        ],
+        "player_distance_ratio": 0.23093562736885268,
+        "player_distance_px": 35.7228548586194,
+        "candidate_size_px": 7.589137500401452,
+        "expected_size_px": 7.734375,
+        "size_factor": 1.019137550161776,
+        "player_count": 11
+      },
+      {
+        "frame": 1796,
+        "bbox": [
+          1179.0,
+          339.75,
+          1188.0,
+          348.75
+        ],
+        "player_distance_ratio": 0.19248214299462302,
+        "player_distance_px": 29.594129485423288,
+        "candidate_size_px": 9.0,
+        "expected_size_px": 7.6875,
+        "size_factor": 1.170731707317073,
+        "player_count": 11
+      },
+      {
+        "frame": 1798,
+        "bbox": [
+          1186.125,
+          340.5,
+          1195.875,
+          349.5
+        ],
+        "player_distance_ratio": 0.1916465649787177,
+        "player_distance_px": 30.364002638815588,
+        "candidate_size_px": 9.367496997597597,
+        "expected_size_px": 7.921875,
+        "size_factor": 1.182484828099105,
+        "player_count": 11
+      },
+      {
+        "frame": 1804,
+        "bbox": [
+          1211.966,
+          343.024,
+          1220.927,
+          351.36
+        ],
+        "player_distance_ratio": 0.15795386514692297,
+        "player_distance_px": 27.098959989268973,
+        "candidate_size_px": 8.642852306964421,
+        "expected_size_px": 8.578125,
+        "size_factor": 1.007545624127,
+        "player_count": 10
+      },
+      {
+        "frame": 1809,
+        "bbox": [
+          1233.119,
+          343.232,
+          1241.871,
+          351.985
+        ],
+        "player_distance_ratio": 0.14168645714299893,
+        "player_distance_px": 24.839407017882,
+        "candidate_size_px": 8.75249998571845,
+        "expected_size_px": 8.765625,
+        "size_factor": 1.0014995731851433,
+        "player_count": 12
+      },
+      {
+        "frame": 1851,
+        "bbox": [
+          1121.626,
+          355.319,
+          1130.795,
+          363.238
+        ],
+        "player_distance_ratio": 0.05509640486819585,
+        "player_distance_px": 9.762394237583452,
+        "candidate_size_px": 8.521109728198587,
+        "expected_size_px": 8.859375,
+        "size_factor": 1.0396973261219726,
+        "player_count": 11
+      },
+      {
+        "frame": 1853,
+        "bbox": [
+          1118.604,
+          357.195,
+          1127.565,
+          366.364
+        ],
+        "player_distance_ratio": 0.09558956808394183,
+        "player_distance_px": 16.130739614165183,
+        "candidate_size_px": 9.064403400114095,
+        "expected_size_px": 8.4375,
+        "size_factor": 1.0742996622357446,
+        "player_count": 11
+      },
+      {
+        "frame": 1854,
+        "bbox": [
+          1116.832,
+          358.029,
+          1126.419,
+          367.198
+        ],
+        "player_distance_ratio": 0.11021255929805378,
+        "player_distance_px": 19.218315027598127,
+        "candidate_size_px": 9.375670802667921,
+        "expected_size_px": 8.71875,
+        "size_factor": 1.0753457551447079,
+        "player_count": 9
+      },
+      {
+        "frame": 1855,
+        "bbox": [
+          1117.125,
+          359.25,
+          1126.875,
+          368.25
+        ],
+        "player_distance_ratio": 0.15473164548963644,
+        "player_distance_px": 26.256026094022683,
+        "candidate_size_px": 9.367496997597597,
+        "expected_size_px": 8.484375,
+        "size_factor": 1.1040880439157388,
+        "player_count": 13
+      },
+      {
+        "frame": 1856,
+        "bbox": [
+          1115.625,
+          360.375,
+          1125.375,
+          368.625
+        ],
+        "player_distance_ratio": 0.17258569304374888,
+        "player_distance_px": 28.63843843944708,
+        "candidate_size_px": 8.968695557326049,
+        "expected_size_px": 8.296875,
+        "size_factor": 1.0809727225402395,
+        "player_count": 12
+      },
+      {
+        "frame": 1861,
+        "bbox": [
+          1105.125,
+          364.125,
+          1114.875,
+          373.875
+        ],
+        "player_distance_ratio": 0.22612875867731902,
+        "player_distance_px": 39.00721087183753,
+        "candidate_size_px": 9.75,
+        "expected_size_px": 8.625,
+        "size_factor": 1.1304347826086956,
+        "player_count": 13
+      },
+      {
+        "frame": 1862,
+        "bbox": [
+          1107.142,
+          366.364,
+          1118.187,
+          375.534
+        ],
+        "player_distance_ratio": 0.243636533434351,
+        "player_distance_px": 35.860252264868535,
+        "candidate_size_px": 10.06392815952095,
+        "expected_size_px": 7.359375,
+        "size_factor": 1.3674976692342693,
+        "player_count": 14
+      },
+      {
+        "frame": 1863,
+        "bbox": [
+          1106.25,
+          364.875,
+          1116.75,
+          376.125
+        ],
+        "player_distance_ratio": 0.27897769982631,
+        "player_distance_px": 46.55440365851548,
+        "candidate_size_px": 10.868532559642079,
+        "expected_size_px": 8.34375,
+        "size_factor": 1.302595662578826,
+        "player_count": 16
+      },
+      {
+        "frame": 1864,
+        "bbox": [
+          1103.25,
+          368.25,
+          1113.75,
+          378.75
+        ],
+        "player_distance_ratio": 0.20313874223105086,
+        "player_distance_px": 29.518598480449576,
+        "candidate_size_px": 10.5,
+        "expected_size_px": 7.265625,
+        "size_factor": 1.4451612903225806,
+        "player_count": 11
+      },
+      {
+        "frame": 1865,
+        "bbox": [
+          1100.369,
+          368.865,
+          1112.039,
+          378.035
+        ],
+        "player_distance_ratio": 0.17916869231106114,
+        "player_distance_px": 28.38703968803375,
+        "candidate_size_px": 10.344752292829483,
+        "expected_size_px": 7.921875,
+        "size_factor": 1.3058464432763055,
+        "player_count": 11
+      },
+      {
+        "frame": 1866,
+        "bbox": [
+          1101.75,
+          369.0,
+          1112.25,
+          379.5
+        ],
+        "player_distance_ratio": 0.1428366519985217,
+        "player_distance_px": 22.362863328518554,
+        "candidate_size_px": 10.5,
+        "expected_size_px": 7.828125,
+        "size_factor": 1.341317365269461,
+        "player_count": 13
+      },
+      {
+        "frame": 1867,
+        "bbox": [
+          1103.625,
+          370.125,
+          1113.375,
+          379.875
+        ],
+        "player_distance_ratio": 0.15368121542811894,
+        "player_distance_px": 23.196258453681704,
+        "candidate_size_px": 9.75,
+        "expected_size_px": 7.546875,
+        "size_factor": 1.2919254658385093,
+        "player_count": 13
+      },
+      {
+        "frame": 1868,
+        "bbox": [
+          1101.75,
+          371.625,
+          1112.25,
+          381.375
+        ],
+        "player_distance_ratio": 0.1528758055443581,
+        "player_distance_px": 23.07469189935155,
+        "candidate_size_px": 10.11805317242403,
+        "expected_size_px": 7.546875,
+        "size_factor": 1.3406944162218177,
+        "player_count": 13
+      },
+      {
+        "frame": 1869,
+        "bbox": [
+          1095.993,
+          372.825,
+          1107.246,
+          382.411
+        ],
+        "player_distance_ratio": 0.12388641117560684,
+        "player_distance_px": 19.74439678111234,
+        "candidate_size_px": 10.386108896020763,
+        "expected_size_px": 7.96875,
+        "size_factor": 1.303354841853586,
+        "player_count": 12
+      },
+      {
+        "frame": 1870,
+        "bbox": [
+          1091.625,
+          373.5,
+          1101.375,
+          382.5
+        ],
+        "player_distance_ratio": 0.12950644141256812,
+        "player_distance_px": 21.247150544249457,
+        "candidate_size_px": 9.367496997597597,
+        "expected_size_px": 8.203125,
+        "size_factor": 1.141942491135707,
+        "player_count": 10
+      },
+      {
+        "frame": 1871,
+        "bbox": [
+          1090.678,
+          373.867,
+          1102.14,
+          383.036
+        ],
+        "player_distance_ratio": 0.24571873779690093,
+        "player_distance_px": 30.86841643573568,
+        "candidate_size_px": 10.251589047557442,
+        "expected_size_px": 6.28125,
+        "size_factor": 1.6320937787156127,
+        "player_count": 12
+      },
+      {
+        "frame": 1872,
+        "bbox": [
+          1091.25,
+          372.75,
+          1101.75,
+          383.25
+        ],
+        "player_distance_ratio": 0.11337062756156881,
+        "player_distance_px": 17.111879097574292,
+        "candidate_size_px": 10.5,
+        "expected_size_px": 7.546875,
+        "size_factor": 1.391304347826087,
+        "player_count": 12
+      },
+      {
+        "frame": 1874,
+        "bbox": [
+          1086.51,
+          377.201,
+          1097.139,
+          385.537
+        ],
+        "player_distance_ratio": 0.10397105830272714,
+        "player_distance_px": 15.400713011091458,
+        "candidate_size_px": 9.41293493019041,
+        "expected_size_px": 7.40625,
+        "size_factor": 1.2709448007008148,
+        "player_count": 14
+      },
+      {
+        "frame": 1875,
+        "bbox": [
+          1081.5,
+          375.0,
+          1092.0,
+          385.5
+        ],
+        "player_distance_ratio": 0.08053372245594839,
+        "player_distance_px": 11.400555085170195,
+        "candidate_size_px": 10.5,
+        "expected_size_px": 7.078125,
+        "size_factor": 1.4834437086092715,
+        "player_count": 15
+      },
+      {
+        "frame": 1876,
+        "bbox": [
+          1076.82,
+          377.201,
+          1088.073,
+          387.204
+        ],
+        "player_distance_ratio": 0.05339657799407798,
+        "player_distance_px": 8.71031678528397,
+        "candidate_size_px": 10.6096069201456,
+        "expected_size_px": 8.15625,
+        "size_factor": 1.300794718178771,
+        "player_count": 14
+      },
+      {
+        "frame": 1877,
+        "bbox": [
+          1074.75,
+          377.25,
+          1086.75,
+          387.75
+        ],
+        "player_distance_ratio": 0.07322317019264617,
+        "player_distance_px": 12.01317635973101,
+        "candidate_size_px": 11.224972160321824,
+        "expected_size_px": 8.203125,
+        "size_factor": 1.368377558591613,
+        "player_count": 15
+      },
+      {
+        "frame": 1878,
+        "bbox": [
+          1074.319,
+          380.119,
+          1084.739,
+          387.621
+        ],
+        "player_distance_ratio": 0.23957950907135517,
+        "player_distance_px": 46.04418689965107,
+        "candidate_size_px": 8.841427486554423,
+        "expected_size_px": 9.609375,
+        "size_factor": 1.0868578648202942,
+        "player_count": 14
+      },
+      {
+        "frame": 1880,
+        "bbox": [
+          1065.566,
+          380.952,
+          1073.902,
+          388.455
+        ],
+        "player_distance_ratio": 0.06587901794727688,
+        "player_distance_px": 11.425892175230834,
+        "candidate_size_px": 7.9085401939928195,
+        "expected_size_px": 8.671875,
+        "size_factor": 1.0965203169337112,
+        "player_count": 14
+      },
+      {
+        "frame": 1884,
+        "bbox": [
+          1053.75,
+          383.25,
+          1064.25,
+          392.25
+        ],
+        "player_distance_ratio": 0.20808914416229557,
+        "player_distance_px": 43.50363670142992,
+        "candidate_size_px": 9.72111104761179,
+        "expected_size_px": 10.453125,
+        "size_factor": 1.0753014700483279,
+        "player_count": 12
+      },
+      {
+        "frame": 1892,
+        "bbox": [
+          1032.375,
+          387.375,
+          1043.625,
+          398.625
+        ],
+        "player_distance_ratio": 0.09498155943487514,
+        "player_distance_px": 19.500901421472804,
+        "candidate_size_px": 11.25,
+        "expected_size_px": 10.265625,
+        "size_factor": 1.095890410958904,
+        "player_count": 14
+      },
+      {
+        "frame": 1896,
+        "bbox": [
+          1029.375,
+          393.0,
+          1040.625,
+          403.5
+        ],
+        "player_distance_ratio": 0.11034837507751748,
+        "player_distance_px": 25.03528759571178,
+        "candidate_size_px": 10.868532559642079,
+        "expected_size_px": 11.34375,
+        "size_factor": 1.0437241585053108,
+        "player_count": 17
+      },
+      {
+        "frame": 1897,
+        "bbox": [
+          1027.875,
+          394.125,
+          1039.125,
+          403.875
+        ],
+        "player_distance_ratio": 0.10223594225166277,
+        "player_distance_px": 22.42800983145852,
+        "candidate_size_px": 10.473180032826706,
+        "expected_size_px": 10.96875,
+        "size_factor": 1.0473180032826706,
+        "player_count": 16
+      },
+      {
+        "frame": 1909,
+        "bbox": [
+          1031.572,
+          399.083,
+          1042.409,
+          409.503
+        ],
+        "player_distance_ratio": 0.052182123989177466,
+        "player_distance_px": 11.007166778967122,
+        "candidate_size_px": 10.626454723942592,
+        "expected_size_px": 10.546875,
+        "size_factor": 1.007545336788631,
+        "player_count": 14
+      },
+      {
+        "frame": 1957,
+        "bbox": [
+          1193.94,
+          359.904,
+          1199.775,
+          365.322
+        ],
+        "player_distance_ratio": 0.2708952661975049,
+        "player_distance_px": 60.44350627031829,
+        "candidate_size_px": 5.622635503035942,
+        "expected_size_px": 11.15625,
+        "size_factor": 1.9841673880471504,
+        "player_count": 13
+      },
+      {
+        "frame": 1959,
+        "bbox": [
+          1214.25,
+          352.5,
+          1223.25,
+          361.5
+        ],
+        "player_distance_ratio": 0.41010419302248413,
+        "player_distance_px": 86.89082589663883,
+        "candidate_size_px": 9.0,
+        "expected_size_px": 10.59375,
+        "size_factor": 1.1770833333333333,
+        "player_count": 13
+      },
+      {
+        "frame": 1960,
+        "bbox": [
+          1226.242,
+          354.486,
+          1231.66,
+          360.738
+        ],
+        "player_distance_ratio": 0.43961934450211787,
+        "player_distance_px": 103.44792700315462,
+        "candidate_size_px": 5.8200804118157,
+        "expected_size_px": 11.765625,
+        "size_factor": 2.021557120776869,
+        "player_count": 15
+      },
+      {
+        "frame": 1964,
+        "bbox": [
+          1266.254,
+          357.403,
+          1275.424,
+          366.156
+        ],
+        "player_distance_ratio": 0.651772391404799,
+        "player_distance_px": 146.6487880660798,
+        "candidate_size_px": 8.959074170917468,
+        "expected_size_px": 11.25,
+        "size_factor": 1.2557101085868034,
+        "player_count": 16
+      },
+      {
+        "frame": 1965,
+        "bbox": [
+          1273.875,
+          358.125,
+          1285.125,
+          367.875
+        ],
+        "player_distance_ratio": 1.0101324601969308,
+        "player_distance_px": 222.5448076371363,
+        "candidate_size_px": 10.473180032826706,
+        "expected_size_px": 11.015625,
+        "size_factor": 1.0517937212454171,
+        "player_count": 13
+      },
+      {
+        "frame": 1966,
+        "bbox": [
+          1285.125,
+          361.5,
+          1294.875,
+          370.5
+        ],
+        "player_distance_ratio": 0.7471744269341483,
+        "player_distance_px": 164.61186593392955,
+        "candidate_size_px": 9.367496997597597,
+        "expected_size_px": 11.015625,
+        "size_factor": 1.1759411295061086,
+        "player_count": 14
+      },
+      {
+        "frame": 1967,
+        "bbox": [
+          1291.262,
+          367.615,
+          1300.015,
+          375.117
+        ],
+        "player_distance_ratio": 0.7845095843581815,
+        "player_distance_px": 175.04370100991926,
+        "candidate_size_px": 8.103394720732865,
+        "expected_size_px": 11.15625,
+        "size_factor": 1.376737822169304,
+        "player_count": 14
+      },
+      {
+        "frame": 1968,
+        "bbox": [
+          1297.125,
+          370.125,
+          1306.875,
+          379.875
+        ],
+        "player_distance_ratio": 0.7697982490741687,
+        "player_distance_px": 166.70943331512467,
+        "candidate_size_px": 9.75,
+        "expected_size_px": 10.828125,
+        "size_factor": 1.1105769230769231,
+        "player_count": 15
+      },
+      {
+        "frame": 1969,
+        "bbox": [
+          1299.375,
+          373.125,
+          1310.625,
+          382.875
+        ],
+        "player_distance_ratio": 0.7085982069537874,
+        "player_distance_px": 151.46286673637206,
+        "candidate_size_px": 10.473180032826706,
+        "expected_size_px": 10.6875,
+        "size_factor": 1.0204636955061919,
+        "player_count": 15
+      },
+      {
+        "frame": 1970,
+        "bbox": [
+          1303.974,
+          368.865,
+          1313.977,
+          378.035
+        ],
+        "player_distance_ratio": 0.6882512945464168,
+        "player_distance_px": 140.66135832292392,
+        "candidate_size_px": 9.577447989939783,
+        "expected_size_px": 10.21875,
+        "size_factor": 1.0669595920263775,
+        "player_count": 16
+      },
+      {
+        "frame": 1971,
+        "bbox": [
+          1309.125,
+          362.625,
+          1318.875,
+          372.375
+        ],
+        "player_distance_ratio": 0.5891980028094052,
+        "player_distance_px": 132.01717750448233,
+        "candidate_size_px": 9.75,
+        "expected_size_px": 11.203125,
+        "size_factor": 1.1490384615384615,
+        "player_count": 16
+      },
+      {
+        "frame": 1974,
+        "bbox": [
+          1323.0,
+          352.125,
+          1333.5,
+          361.875
+        ],
+        "player_distance_ratio": 0.4734320764739993,
+        "player_distance_px": 102.97147663309485,
+        "candidate_size_px": 10.11805317242403,
+        "expected_size_px": 10.875,
+        "size_factor": 1.0748115091585968,
+        "player_count": 14
+      },
+      {
+        "frame": 1975,
+        "bbox": [
+          1326.273,
+          351.985,
+          1333.358,
+          358.237
+        ],
+        "player_distance_ratio": 0.4389798054491287,
+        "player_distance_px": 93.00884627953414,
+        "candidate_size_px": 6.655480448472544,
+        "expected_size_px": 10.59375,
+        "size_factor": 1.5917333214360658,
+        "player_count": 13
+      },
+      {
+        "frame": 1976,
+        "bbox": [
+          1333.984,
+          352.193,
+          1340.652,
+          358.862
+        ],
+        "player_distance_ratio": 0.38083886967235225,
+        "player_distance_px": 58.55397621212416,
+        "candidate_size_px": 6.668499981255234,
+        "expected_size_px": 7.6875,
+        "size_factor": 1.1528079810465794,
+        "player_count": 13
+      },
+      {
+        "frame": 1977,
+        "bbox": [
+          1337.625,
+          348.375,
+          1347.375,
+          356.625
+        ],
+        "player_distance_ratio": 0.34599632702426386,
+        "player_distance_px": 52.548192166810075,
+        "candidate_size_px": 8.968695557326049,
+        "expected_size_px": 7.59375,
+        "size_factor": 1.1810627894421135,
+        "player_count": 14
+      },
+      {
+        "frame": 1978,
+        "bbox": [
+          1339.5,
+          348.0,
+          1350.0,
+          357.0
+        ],
+        "player_distance_ratio": 0.2638565659111833,
+        "player_distance_px": 36.85746405071841,
+        "candidate_size_px": 9.72111104761179,
+        "expected_size_px": 6.984375,
+        "size_factor": 1.3918369285171244,
+        "player_count": 14
+      },
+      {
+        "frame": 1979,
+        "bbox": [
+          1340.625,
+          346.875,
+          1350.375,
+          355.125
+        ],
+        "player_distance_ratio": 0.2078417797647979,
+        "player_distance_px": 30.786563627660687,
+        "candidate_size_px": 8.968695557326049,
+        "expected_size_px": 7.40625,
+        "size_factor": 1.2109631132254581,
+        "player_count": 14
+      },
+      {
+        "frame": 1980,
+        "bbox": [
+          1345.875,
+          348.375,
+          1354.125,
+          356.625
+        ],
+        "player_distance_ratio": 0.1104323752182645,
+        "player_distance_px": 15.840143820369814,
+        "candidate_size_px": 8.25,
+        "expected_size_px": 7.171875,
+        "size_factor": 1.1503267973856208,
+        "player_count": 15
+      },
+      {
+        "frame": 1987,
+        "bbox": [
+          1330.875,
+          348.75,
+          1339.125,
+          356.25
+        ],
+        "player_distance_ratio": 0.11065155811383494,
+        "player_distance_px": 15.767847031221478,
+        "candidate_size_px": 7.866066361276137,
+        "expected_size_px": 7.125,
+        "size_factor": 1.1040093138633176,
+        "player_count": 11
+      },
+      {
+        "frame": 1988,
+        "bbox": [
+          1321.5,
+          348.0,
+          1330.5,
+          355.5
+        ],
+        "player_distance_ratio": 0.17919466131444492,
+        "player_distance_px": 28.559149146989657,
+        "candidate_size_px": 8.215838362577491,
+        "expected_size_px": 7.96875,
+        "size_factor": 1.031007167068548,
+        "player_count": 10
+      },
+      {
+        "frame": 1991,
+        "bbox": [
+          1294.875,
+          348.375,
+          1303.125,
+          356.625
+        ],
+        "player_distance_ratio": 0.226211508803273,
+        "player_distance_px": 43.6870976376321,
+        "candidate_size_px": 8.25,
+        "expected_size_px": 9.65625,
+        "size_factor": 1.1704545454545454,
+        "player_count": 11
+      },
+      {
+        "frame": 1992,
+        "bbox": [
+          1284.375,
+          348.75,
+          1292.625,
+          356.25
+        ],
+        "player_distance_ratio": 0.2560757288990511,
+        "player_distance_px": 48.974483151943524,
+        "candidate_size_px": 7.866066361276137,
+        "expected_size_px": 9.5625,
+        "size_factor": 1.2156648012881301,
+        "player_count": 11
+      },
+      {
+        "frame": 1993,
+        "bbox": [
+          1272.75,
+          349.875,
+          1280.25,
+          358.125
+        ],
+        "player_distance_ratio": 0.2716417910447761,
+        "player_distance_px": 51.1875,
+        "candidate_size_px": 7.866066361276137,
+        "expected_size_px": 9.421875,
+        "size_factor": 1.1977873777397754,
+        "player_count": 11
+      },
+      {
+        "frame": 1996,
+        "bbox": [
+          1228.125,
+          353.625,
+          1237.875,
+          363.375
+        ],
+        "player_distance_ratio": 0.31632646895822614,
+        "player_distance_px": 55.15942802459068,
+        "candidate_size_px": 9.75,
+        "expected_size_px": 8.71875,
+        "size_factor": 1.118279569892473,
+        "player_count": 11
+      },
+      {
+        "frame": 1997,
+        "bbox": [
+          1215.0,
+          351.75,
+          1224.0,
+          360.75
+        ],
+        "player_distance_ratio": 0.3291962261075054,
+        "player_distance_px": 54.93462023168996,
+        "candidate_size_px": 9.0,
+        "expected_size_px": 8.34375,
+        "size_factor": 1.0786516853932584,
+        "player_count": 10
+      },
+      {
+        "frame": 2021,
+        "bbox": [
+          916.5,
+          317.25,
+          924.0,
+          324.75
+        ],
+        "player_distance_ratio": 0.33418259160995717,
+        "player_distance_px": 52.63375817856825,
+        "candidate_size_px": 7.5,
+        "expected_size_px": 7.875,
+        "size_factor": 1.05,
+        "player_count": 11
+      },
+      {
+        "frame": 2028,
+        "bbox": [
+          864.375,
+          324.938,
+          872.625,
+          332.062
+        ],
+        "player_distance_ratio": 0.22888559021221763,
+        "player_distance_px": 35.405739735952416,
+        "candidate_size_px": 7.666355066131505,
+        "expected_size_px": 7.734375,
+        "size_factor": 1.0088725258981277,
+        "player_count": 9
+      },
+      {
+        "frame": 2029,
+        "bbox": [
+          856.588,
+          328.228,
+          864.286,
+          335.313
+        ],
+        "player_distance_ratio": 0.1914758632018375,
+        "player_distance_px": 28.721379480275623,
+        "candidate_size_px": 7.385142517243637,
+        "expected_size_px": 7.5,
+        "size_factor": 1.0155525072790648,
+        "player_count": 10
+      }
+    ]
+  },
+  "pilot_false_targets": {
+    "samples": 20,
+    "player_distance_ratio": {
+      "n": 20,
+      "min": 0.3593,
+      "p10": 0.4455,
+      "median": 3.6201,
+      "mean": 3.1195,
+      "p90": 5.6026,
+      "max": 5.7339
+    },
+    "size_factor": {
+      "n": 20,
+      "min": 1.1832,
+      "p10": 1.3026,
+      "median": 1.8191,
+      "mean": 1.8108,
+      "p90": 2.2465,
+      "max": 2.327
+    },
+    "player_count": {
+      "n": 20,
+      "min": 2.0,
+      "p10": 2.0,
+      "median": 3.0,
+      "mean": 3.05,
+      "p90": 4.1,
+      "max": 6.0
+    },
+    "details": [
+      {
+        "id": "demo4_c00006",
+        "frame": 6,
+        "player_distance_ratio": 0.4706076695700197,
+        "player_distance_px": 89.56252211504437,
+        "candidate_size_px": 4.141840097888467,
+        "expected_size_px": 9.515625,
+        "size_factor": 2.2974390066026733,
+        "player_count": 2
+      },
+      {
+        "id": "demo4_b01721",
+        "frame": 7,
+        "player_distance_ratio": 0.4549480684399937,
+        "player_distance_px": 84.44973520417383,
+        "candidate_size_px": 4.141840097888467,
+        "expected_size_px": 9.28125,
+        "size_factor": 2.240851838952361,
+        "player_count": 4
+      },
+      {
+        "id": "demo4_b01722",
+        "frame": 14,
+        "player_distance_ratio": 2.102090560606028,
+        "player_distance_px": 264.07512667613224,
+        "candidate_size_px": 4.141840097888467,
+        "expected_size_px": 6.28125,
+        "size_factor": 1.5165360930283658,
+        "player_count": 2
+      },
+      {
+        "id": "demo4_b01723",
+        "frame": 23,
+        "player_distance_ratio": 0.35930325705828314,
+        "player_distance_px": 65.34827987747525,
+        "candidate_size_px": 4.346495487969959,
+        "expected_size_px": 9.09375,
+        "size_factor": 2.092202793070713,
+        "player_count": 4
+      },
+      {
+        "id": "demo4_c00009",
+        "frame": 25,
+        "player_distance_ratio": 0.36013287310490333,
+        "player_distance_px": 67.18728913863353,
+        "candidate_size_px": 4.008623189897963,
+        "expected_size_px": 9.328125,
+        "size_factor": 2.327014677634852,
+        "player_count": 3
+      },
+      {
+        "id": "demo4_b01724",
+        "frame": 31,
+        "player_distance_ratio": 0.5947515598226146,
+        "player_distance_px": 92.5582114973944,
+        "candidate_size_px": 5.196152422706632,
+        "expected_size_px": 7.78125,
+        "size_factor": 1.497502260710592,
+        "player_count": 6
+      },
+      {
+        "id": "demo4_c00012",
+        "frame": 36,
+        "player_distance_ratio": 3.8519378837369183,
+        "player_distance_px": 606.6802166885647,
+        "candidate_size_px": 6.655695153335129,
+        "expected_size_px": 7.875,
+        "size_factor": 1.1831972196103189,
+        "player_count": 3
+      },
+      {
+        "id": "demo4_b01725",
+        "frame": 38,
+        "player_distance_ratio": 3.965256917721004,
+        "player_distance_px": 736.0508153519614,
+        "candidate_size_px": 7.115124735378854,
+        "expected_size_px": 9.28125,
+        "size_factor": 1.3044395348194564,
+        "player_count": 3
+      },
+      {
+        "id": "demo4_c00015",
+        "frame": 39,
+        "player_distance_ratio": 2.613471794182784,
+        "player_distance_px": 443.47349507539116,
+        "candidate_size_px": 5.027541370583692,
+        "expected_size_px": 8.484375,
+        "size_factor": 1.6875793503445549,
+        "player_count": 2
+      },
+      {
+        "id": "demo4_b01727",
+        "frame": 40,
+        "player_distance_ratio": 2.6110430747205133,
+        "player_distance_px": 447.9570775067381,
+        "candidate_size_px": 5.027541370583692,
+        "expected_size_px": 8.578125,
+        "size_factor": 1.7062266359837213,
+        "player_count": 3
+      },
+      {
+        "id": "demo4_c00017",
+        "frame": 41,
+        "player_distance_ratio": 4.118075331914275,
+        "player_distance_px": 752.8356466155784,
+        "candidate_size_px": 4.58477783203125,
+        "expected_size_px": 9.140625,
+        "size_factor": 1.993689843843604,
+        "player_count": 3
+      },
+      {
+        "id": "demo4_c00020",
+        "frame": 42,
+        "player_distance_ratio": 5.733858312144642,
+        "player_distance_px": 1042.8454805213069,
+        "candidate_size_px": 4.788649580891396,
+        "expected_size_px": 9.09375,
+        "size_factor": 1.8990218111359947,
+        "player_count": 3
+      },
+      {
+        "id": "demo4_b01731",
+        "frame": 43,
+        "player_distance_ratio": 5.708242350769186,
+        "player_distance_px": 1043.538054749992,
+        "candidate_size_px": 4.788649580891396,
+        "expected_size_px": 9.140625,
+        "size_factor": 1.908810583358345,
+        "player_count": 5
+      },
+      {
+        "id": "demo4_b01732",
+        "frame": 44,
+        "player_distance_ratio": 5.59089873672276,
+        "player_distance_px": 1043.05204556984,
+        "candidate_size_px": 4.788649580891396,
+        "expected_size_px": 9.328125,
+        "size_factor": 1.947965672247747,
+        "player_count": 2
+      },
+      {
+        "id": "demo4_c00024",
+        "frame": 45,
+        "player_distance_ratio": 4.511652814875711,
+        "player_distance_px": 837.4755537613038,
+        "candidate_size_px": 5.4183502197050775,
+        "expected_size_px": 9.28125,
+        "size_factor": 1.7129291433112976,
+        "player_count": 3
+      },
+      {
+        "id": "demo4_b01733",
+        "frame": 46,
+        "player_distance_ratio": 4.395603049336741,
+        "player_distance_px": 836.5382053268985,
+        "candidate_size_px": 5.4183502197050775,
+        "expected_size_px": 9.515625,
+        "size_factor": 1.7561849297585528,
+        "player_count": 3
+      },
+      {
+        "id": "demo4_c00027",
+        "frame": 47,
+        "player_distance_ratio": 3.388278306322179,
+        "player_distance_px": 648.0082260841167,
+        "candidate_size_px": 5.104679662525056,
+        "expected_size_px": 9.5625,
+        "size_factor": 1.8732811130541853,
+        "player_count": 2
+      },
+      {
+        "id": "demo4_c00030",
+        "frame": 49,
+        "player_distance_ratio": 2.49400085205517,
+        "player_distance_px": 458.27265656513754,
+        "candidate_size_px": 5.205776395713887,
+        "expected_size_px": 9.1875,
+        "size_factor": 1.764866429446416,
+        "player_count": 3
+      },
+      {
+        "id": "demo4_c00033",
+        "frame": 50,
+        "player_distance_ratio": 4.57649117317265,
+        "player_distance_px": 823.768411171077,
+        "candidate_size_px": 4.051757901684293,
+        "expected_size_px": 9.0,
+        "size_factor": 2.2212580855975506,
+        "player_count": 2
+      },
+      {
+        "id": "demo4_b01737",
+        "frame": 53,
+        "player_distance_ratio": 4.489109203615646,
+        "player_distance_px": 816.4567364075956,
+        "candidate_size_px": 7.073272485390322,
+        "expected_size_px": 9.09375,
+        "size_factor": 1.2856496082658948,
+        "player_count": 3
+      }
+    ]
+  }
+}

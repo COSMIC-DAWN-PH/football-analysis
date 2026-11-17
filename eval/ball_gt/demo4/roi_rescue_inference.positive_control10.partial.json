@@ -1,0 +1,39 @@
+{
+  "scope": "matched human keyframes plus primary-empty pilot frames",
+  "device": "intel:GPU",
+  "model": "models\\weights\\ball-detection_openvino_model_1280_fp16",
+  "roi_options": {
+    "maximum_rois": 6,
+    "minimum_half_size": 64.0,
+    "horizontal_player_scale": 2.25,
+    "upward_player_scale": 2.0,
+    "downward_player_scale": 1.0,
+    "predicted_player_scale": 2.5,
+    "dedup_iou": 0.6
+  },
+  "player_gate": {
+    "distance": 1.2,
+    "size_factor": 2.2,
+    "minimum_players": 2
+  },
+  "processed_frames": 10,
+  "gt_trigger_frames": 10,
+  "gt_raw_rescued": 1,
+  "gt_gated_rescued": 0,
+  "pilot_trigger_items": 0,
+  "pilot_raw_false_matches": 0,
+  "pilot_gated_false_matches": 0,
+  "raw_candidates": 25,
+  "gated_candidates": 6,
+  "roi_count": {
+    "mean": 5.9,
+    "median": 6.0,
+    "max": 6.0
+  },
+  "inference_seconds_per_trigger_frame": {
+    "mean": 0.4216,
+    "median": 0.2042,
+    "max": 2.3836
+  },
+  "inference_seconds_total": 4.216
+}

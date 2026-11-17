@@ -1,0 +1,164 @@
+{
+  "ground_truth": "all pilot items are not_ball",
+  "match_radius_px": 24.0,
+  "items": 20,
+  "survived_false_targets": 3,
+  "removed_false_targets": 17,
+  "by_category": {
+    "bridge_sweep": {
+      "items": 10,
+      "survived": 2
+    },
+    "confirmed": {
+      "items": 10,
+      "survived": 1
+    }
+  },
+  "survived_ids": [
+    "demo4_b01723",
+    "demo4_c00009",
+    "demo4_b01724"
+  ],
+  "details": [
+    {
+      "id": "demo4_c00006",
+      "frame": 6,
+      "category": "confirmed",
+      "survived": false,
+      "center_distance_px": 250.152
+    },
+    {
+      "id": "demo4_b01721",
+      "frame": 7,
+      "category": "bridge_sweep",
+      "survived": false,
+      "center_distance_px": 250.139
+    },
+    {
+      "id": "demo4_b01722",
+      "frame": 14,
+      "category": "bridge_sweep",
+      "survived": false,
+      "center_distance_px": 250.052
+    },
+    {
+      "id": "demo4_b01723",
+      "frame": 23,
+      "category": "bridge_sweep",
+      "survived": true,
+      "center_distance_px": 1.563
+    },
+    {
+      "id": "demo4_c00009",
+      "frame": 25,
+      "category": "confirmed",
+      "survived": true,
+      "center_distance_px": 2.078
+    },
+    {
+      "id": "demo4_b01724",
+      "frame": 31,
+      "category": "bridge_sweep",
+      "survived": true,
+      "center_distance_px": 17.607
+    },
+    {
+      "id": "demo4_c00012",
+      "frame": 36,
+      "category": "confirmed",
+      "survived": false,
+      "center_distance_px": 659.677
+    },
+    {
+      "id": "demo4_b01725",
+      "frame": 38,
+      "category": "bridge_sweep",
+      "survived": false,
+      "center_distance_px": 662.208
+    },
+    {
+      "id": "demo4_c00015",
+      "frame": 39,
+      "category": "confirmed",
+      "survived": false,
+      "center_distance_px": 958.628
+    },
+    {
+      "id": "demo4_b01727",
+      "frame": 40,
+      "category": "bridge_sweep",
+      "survived": false,
+      "center_distance_px": 958.628
+    },
+    {
+      "id": "demo4_c00017",
+      "frame": 41,
+      "category": "confirmed",
+      "survived": false,
+      "center_distance_px": 753.761
+    },
+    {
+      "id": "demo4_c00020",
+      "frame": 42,
+      "category": "confirmed",
+      "survived": false,
+      "center_distance_px": 1056.205
+    },
+    {
+      "id": "demo4_b01731",
+      "frame": 43,
+      "category": "bridge_sweep",
+      "survived": false,
+      "center_distance_px": 1056.205
+    },
+    {
+      "id": "demo4_b01732",
+      "frame": 44,
+      "category": "bridge_sweep",
+      "survived": false,
+      "center_distance_px": null
+    },
+    {
+      "id": "demo4_c00024",
+      "frame": 45,
+      "category": "confirmed",
+      "survived": false,
+      "center_distance_px": null
+    },
+    {
+      "id": "demo4_b01733",
+      "frame": 46,
+      "category": "bridge_sweep",
+      "survived": false,
+      "center_distance_px": null
+    },
+    {
+      "id": "demo4_c00027",
+      "frame": 47,
+      "category": "confirmed",
+      "survived": false,
+      "center_distance_px": null
+    },
+    {
+      "id": "demo4_c00030",
+      "frame": 49,
+      "category": "confirmed",
+      "survived": false,
+      "center_distance_px": null
+    },
+    {
+      "id": "demo4_c00033",
+      "frame": 50,
+      "category": "confirmed",
+      "survived": false,
+      "center_distance_px": null
+    },
+    {
+      "id": "demo4_b01737",
+      "frame": 53,
+      "category": "bridge_sweep",
+      "survived": false,
+      "center_distance_px": null
+    }
+  ]
+}
