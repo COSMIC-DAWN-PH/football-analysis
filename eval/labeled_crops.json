@@ -1,0 +1,243 @@
+{
+ "rules": "manual_label: Maroon/Navy or null if ambiguous; auto_label is hue-bimodal suggestion only",
+ "crops": {
+  "p6_f0_h107.png": {
+   "track_id": 6,
+   "frame": 0,
+   "auto_hue": 107.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p6_f4_h106.png": {
+   "track_id": 6,
+   "frame": 4,
+   "auto_hue": 106.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p6_f8_h104.png": {
+   "track_id": 6,
+   "frame": 8,
+   "auto_hue": 104.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p9_f0_h111.png": {
+   "track_id": 9,
+   "frame": 0,
+   "auto_hue": 111.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p12_f12_h168.png": {
+   "track_id": 12,
+   "frame": 12,
+   "auto_hue": 168.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  },
+  "p12_f4_h169.png": {
+   "track_id": 12,
+   "frame": 4,
+   "auto_hue": 169.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  },
+  "p16_f4_h110.png": {
+   "track_id": 16,
+   "frame": 4,
+   "auto_hue": 110.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p58_f72_h107.png": {
+   "track_id": 58,
+   "frame": 72,
+   "auto_hue": 107.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p58_f132_h107.png": {
+   "track_id": 58,
+   "frame": 132,
+   "auto_hue": 107.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p58_f96_h108.png": {
+   "track_id": 58,
+   "frame": 96,
+   "auto_hue": 108.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p58_f136_h107.png": {
+   "track_id": 58,
+   "frame": 136,
+   "auto_hue": 107.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p58_f128_h107.png": {
+   "track_id": 58,
+   "frame": 128,
+   "auto_hue": 107.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p58_f76_h107.png": {
+   "track_id": 58,
+   "frame": 76,
+   "auto_hue": 107.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p63_f100_h107.png": {
+   "track_id": 63,
+   "frame": 100,
+   "auto_hue": 107.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p63_f104_h107.png": {
+   "track_id": 63,
+   "frame": 104,
+   "auto_hue": 107.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p65_f192_h108.png": {
+   "track_id": 65,
+   "frame": 192,
+   "auto_hue": 108.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p65_f212_h107.png": {
+   "track_id": 65,
+   "frame": 212,
+   "auto_hue": 107.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p65_f184_h108.png": {
+   "track_id": 65,
+   "frame": 184,
+   "auto_hue": 108.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p65_f188_h108.png": {
+   "track_id": 65,
+   "frame": 188,
+   "auto_hue": 108.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p65_f228_h108.png": {
+   "track_id": 65,
+   "frame": 228,
+   "auto_hue": 108.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p65_f204_h106.png": {
+   "track_id": 65,
+   "frame": 204,
+   "auto_hue": 106.0,
+   "auto_label": "Navy",
+   "manual_label": "Navy"
+  },
+  "p92_f284_h166.png": {
+   "track_id": 92,
+   "frame": 284,
+   "auto_hue": 166.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  },
+  "p92_f296_h167.png": {
+   "track_id": 92,
+   "frame": 296,
+   "auto_hue": 167.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  },
+  "p92_f216_h168.png": {
+   "track_id": 92,
+   "frame": 216,
+   "auto_hue": 168.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  },
+  "p92_f256_h169.png": {
+   "track_id": 92,
+   "frame": 256,
+   "auto_hue": 169.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  },
+  "p92_f228_h169.png": {
+   "track_id": 92,
+   "frame": 228,
+   "auto_hue": 169.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  },
+  "p92_f260_h169.png": {
+   "track_id": 92,
+   "frame": 260,
+   "auto_hue": 169.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  },
+  "p131_f332_h168.png": {
+   "track_id": 131,
+   "frame": 332,
+   "auto_hue": 168.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  },
+  "p131_f336_h167.png": {
+   "track_id": 131,
+   "frame": 336,
+   "auto_hue": 167.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  },
+  "p131_f328_h167.png": {
+   "track_id": 131,
+   "frame": 328,
+   "auto_hue": 167.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  },
+  "p131_f356_h168.png": {
+   "track_id": 131,
+   "frame": 356,
+   "auto_hue": 168.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  },
+  "p131_f360_h168.png": {
+   "track_id": 131,
+   "frame": 360,
+   "auto_hue": 168.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  },
+  "p131_f344_h168.png": {
+   "track_id": 131,
+   "frame": 344,
+   "auto_hue": 168.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  },
+  "p271_f848_h168.png": {
+   "track_id": 271,
+   "frame": 848,
+   "auto_hue": 168.0,
+   "auto_label": "Maroon",
+   "manual_label": "Maroon"
+  }
+ }
+}

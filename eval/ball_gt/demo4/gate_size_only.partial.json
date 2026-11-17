@@ -1,0 +1,440 @@
+{
+  "frame_gt": {
+    "iou_threshold": 0.3,
+    "scope_note": "Recall/correctness only on frames with visible-ball GT. Precision on unlabelled frames is intentionally not reported for partial annotation.",
+    "missing_track_file_rows": 0,
+    "all": {
+      "iou": {
+        "gt_frames": 1596,
+        "track_matched": 48,
+        "track_recall": 0.0301,
+        "observed_track_matched": 42,
+        "observed_track_recall": 0.0263,
+        "confirmed_track_matched": 39,
+        "confirmed_track_recall": 0.0244,
+        "candidate_matched": 39,
+        "candidate_recall": 0.0244,
+        "missed_no_matching_candidate": 1557,
+        "missed_tracker_selection": 5,
+        "wrong_track_on_gt_frame": 1545,
+        "no_track_on_gt_frame": 3,
+        "matched_track_iou": {
+          "mean": 0.3637,
+          "median": 0.3467
+        },
+        "matched_candidate_iou": {
+          "mean": 0.3706,
+          "median": 0.3571
+        },
+        "matched_track_segments": 8,
+        "sample_frames": {
+          "no_matching_candidate": [],
+          "tracker_selection_miss": [],
+          "wrong_track": []
+        }
+      },
+      "center": {
+        "rule": "predicted center within the GT box (half-diagonal radius)",
+        "gt_frames": 1596,
+        "track_matched": 294,
+        "track_recall": 0.1842,
+        "observed_track_matched": 260,
+        "observed_track_recall": 0.1629,
+        "confirmed_track_matched": 212,
+        "confirmed_track_recall": 0.1328,
+        "candidate_matched": 337,
+        "candidate_recall": 0.2112,
+        "missed_no_matching_candidate": 1259,
+        "missed_tracker_selection": 94,
+        "wrong_track_on_gt_frame": 1299,
+        "no_track_on_gt_frame": 3,
+        "matched_track_center_distance_px": {
+          "mean": 4.3449,
+          "median": 2.8617
+        },
+        "matched_candidate_center_distance_px": {
+          "mean": 4.6004,
+          "median": 3.5915
+        },
+        "matched_track_segments": 35,
+        "sample_frames": {
+          "no_matching_candidate": [],
+          "tracker_selection_miss": [],
+          "wrong_track": []
+        }
+      }
+    },
+    "keyframes": {
+      "iou": {
+        "gt_frames": 425,
+        "track_matched": 30,
+        "track_recall": 0.0706,
+        "observed_track_matched": 28,
+        "observed_track_recall": 0.0659,
+        "confirmed_track_matched": 24,
+        "confirmed_track_recall": 0.0565,
+        "candidate_matched": 26,
+        "candidate_recall": 0.0612,
+        "missed_no_matching_candidate": 399,
+        "missed_tracker_selection": 4,
+        "wrong_track_on_gt_frame": 393,
+        "no_track_on_gt_frame": 2,
+        "matched_track_iou": {
+          "mean": 0.3728,
+          "median": 0.3702
+        },
+        "matched_candidate_iou": {
+          "mean": 0.3798,
+          "median": 0.3734
+        },
+        "matched_track_segments": 7,
+        "sample_frames": {
+          "no_matching_candidate": [],
+          "tracker_selection_miss": [],
+          "wrong_track": []
+        }
+      },
+      "center": {
+        "rule": "predicted center within the GT box (half-diagonal radius)",
+        "gt_frames": 425,
+        "track_matched": 122,
+        "track_recall": 0.2871,
+        "observed_track_matched": 111,
+        "observed_track_recall": 0.2612,
+        "confirmed_track_matched": 92,
+        "confirmed_track_recall": 0.2165,
+        "candidate_matched": 132,
+        "candidate_recall": 0.3106,
+        "missed_no_matching_candidate": 293,
+        "missed_tracker_selection": 26,
+        "wrong_track_on_gt_frame": 301,
+        "no_track_on_gt_frame": 2,
+        "matched_track_center_distance_px": {
+          "mean": 4.1273,
+          "median": 2.8617
+        },
+        "matched_candidate_center_distance_px": {
+          "mean": 4.8294,
+          "median": 3.724
+        },
+        "matched_track_segments": 29,
+        "sample_frames": {
+          "no_matching_candidate": [],
+          "tracker_selection_miss": [],
+          "wrong_track": []
+        }
+      }
+    },
+    "interpolated": {
+      "iou": {
+        "gt_frames": 1171,
+        "track_matched": 18,
+        "track_recall": 0.0154,
+        "observed_track_matched": 14,
+        "observed_track_recall": 0.012,
+        "confirmed_track_matched": 15,
+        "confirmed_track_recall": 0.0128,
+        "candidate_matched": 13,
+        "candidate_recall": 0.0111,
+        "missed_no_matching_candidate": 1158,
+        "missed_tracker_selection": 1,
+        "wrong_track_on_gt_frame": 1152,
+        "no_track_on_gt_frame": 1,
+        "matched_track_iou": {
+          "mean": 0.3485,
+          "median": 0.3428
+        },
+        "matched_candidate_iou": {
+          "mean": 0.352,
+          "median": 0.3428
+        },
+        "matched_track_segments": 5,
+        "sample_frames": {
+          "no_matching_candidate": [],
+          "tracker_selection_miss": [],
+          "wrong_track": []
+        }
+      },
+      "center": {
+        "rule": "predicted center within the GT box (half-diagonal radius)",
+        "gt_frames": 1171,
+        "track_matched": 172,
+        "track_recall": 0.1469,
+        "observed_track_matched": 149,
+        "observed_track_recall": 0.1272,
+        "confirmed_track_matched": 120,
+        "confirmed_track_recall": 0.1025,
+        "candidate_matched": 205,
+        "candidate_recall": 0.1751,
+        "missed_no_matching_candidate": 966,
+        "missed_tracker_selection": 68,
+        "wrong_track_on_gt_frame": 998,
+        "no_track_on_gt_frame": 1,
+        "matched_track_center_distance_px": {
+          "mean": 4.4993,
+          "median": 2.847
+        },
+        "matched_candidate_center_distance_px": {
+          "mean": 4.4529,
+          "median": 3.3491
+        },
+        "matched_track_segments": 31,
+        "sample_frames": {
+          "no_matching_candidate": [],
+          "tracker_selection_miss": [],
+          "wrong_track": []
+        }
+      }
+    },
+    "segments": {
+      "0": {
+        "all": {
+          "iou": {
+            "gt_frames": 235,
+            "track_matched": 0,
+            "track_recall": 0.0,
+            "observed_track_matched": 0,
+            "observed_track_recall": 0.0,
+            "confirmed_track_matched": 0,
+            "confirmed_track_recall": 0.0,
+            "candidate_matched": 0,
+            "candidate_recall": 0.0,
+            "missed_no_matching_candidate": 235,
+            "missed_tracker_selection": 0,
+            "wrong_track_on_gt_frame": 232,
+            "no_track_on_gt_frame": 3,
+            "matched_track_iou": {
+              "mean": null,
+              "median": null
+            },
+            "matched_candidate_iou": {
+              "mean": null,
+              "median": null
+            },
+            "matched_track_segments": 0,
+            "sample_frames": {
+              "no_matching_candidate": [],
+              "tracker_selection_miss": [],
+              "wrong_track": []
+            }
+          },
+          "center": {
+            "rule": "predicted center within the GT box (half-diagonal radius)",
+            "gt_frames": 235,
+            "track_matched": 0,
+            "track_recall": 0.0,
+            "observed_track_matched": 0,
+            "observed_track_recall": 0.0,
+            "confirmed_track_matched": 0,
+            "confirmed_track_recall": 0.0,
+            "candidate_matched": 0,
+            "candidate_recall": 0.0,
+            "missed_no_matching_candidate": 235,
+            "missed_tracker_selection": 0,
+            "wrong_track_on_gt_frame": 232,
+            "no_track_on_gt_frame": 3,
+            "matched_track_center_distance_px": {
+              "mean": null,
+              "median": null
+            },
+            "matched_candidate_center_distance_px": {
+              "mean": null,
+              "median": null
+            },
+            "matched_track_segments": 0,
+            "sample_frames": {
+              "no_matching_candidate": [],
+              "tracker_selection_miss": [],
+              "wrong_track": []
+            }
+          }
+        },
+        "keyframes": {
+          "iou": {
+            "gt_frames": 48,
+            "track_matched": 0,
+            "track_recall": 0.0,
+            "observed_track_matched": 0,
+            "observed_track_recall": 0.0,
+            "confirmed_track_matched": 0,
+            "confirmed_track_recall": 0.0,
+            "candidate_matched": 0,
+            "candidate_recall": 0.0,
+            "missed_no_matching_candidate": 48,
+            "missed_tracker_selection": 0,
+            "wrong_track_on_gt_frame": 46,
+            "no_track_on_gt_frame": 2,
+            "matched_track_iou": {
+              "mean": null,
+              "median": null
+            },
+            "matched_candidate_iou": {
+              "mean": null,
+              "median": null
+            },
+            "matched_track_segments": 0,
+            "sample_frames": {
+              "no_matching_candidate": [],
+              "tracker_selection_miss": [],
+              "wrong_track": []
+            }
+          },
+          "center": {
+            "rule": "predicted center within the GT box (half-diagonal radius)",
+            "gt_frames": 48,
+            "track_matched": 0,
+            "track_recall": 0.0,
+            "observed_track_matched": 0,
+            "observed_track_recall": 0.0,
+            "confirmed_track_matched": 0,
+            "confirmed_track_recall": 0.0,
+            "candidate_matched": 0,
+            "candidate_recall": 0.0,
+            "missed_no_matching_candidate": 48,
+            "missed_tracker_selection": 0,
+            "wrong_track_on_gt_frame": 46,
+            "no_track_on_gt_frame": 2,
+            "matched_track_center_distance_px": {
+              "mean": null,
+              "median": null
+            },
+            "matched_candidate_center_distance_px": {
+              "mean": null,
+              "median": null
+            },
+            "matched_track_segments": 0,
+            "sample_frames": {
+              "no_matching_candidate": [],
+              "tracker_selection_miss": [],
+              "wrong_track": []
+            }
+          }
+        }
+      },
+      "1": {
+        "all": {
+          "iou": {
+            "gt_frames": 1361,
+            "track_matched": 48,
+            "track_recall": 0.0353,
+            "observed_track_matched": 42,
+            "observed_track_recall": 0.0309,
+            "confirmed_track_matched": 39,
+            "confirmed_track_recall": 0.0287,
+            "candidate_matched": 39,
+            "candidate_recall": 0.0287,
+            "missed_no_matching_candidate": 1322,
+            "missed_tracker_selection": 5,
+            "wrong_track_on_gt_frame": 1313,
+            "no_track_on_gt_frame": 0,
+            "matched_track_iou": {
+              "mean": 0.3637,
+              "median": 0.3467
+            },
+            "matched_candidate_iou": {
+              "mean": 0.3706,
+              "median": 0.3571
+            },
+            "matched_track_segments": 8,
+            "sample_frames": {
+              "no_matching_candidate": [],
+              "tracker_selection_miss": [],
+              "wrong_track": []
+            }
+          },
+          "center": {
+            "rule": "predicted center within the GT box (half-diagonal radius)",
+            "gt_frames": 1361,
+            "track_matched": 294,
+            "track_recall": 0.216,
+            "observed_track_matched": 260,
+            "observed_track_recall": 0.191,
+            "confirmed_track_matched": 212,
+            "confirmed_track_recall": 0.1558,
+            "candidate_matched": 337,
+            "candidate_recall": 0.2476,
+            "missed_no_matching_candidate": 1024,
+            "missed_tracker_selection": 94,
+            "wrong_track_on_gt_frame": 1067,
+            "no_track_on_gt_frame": 0,
+            "matched_track_center_distance_px": {
+              "mean": 4.3449,
+              "median": 2.8617
+            },
+            "matched_candidate_center_distance_px": {
+              "mean": 4.6004,
+              "median": 3.5915
+            },
+            "matched_track_segments": 35,
+            "sample_frames": {
+              "no_matching_candidate": [],
+              "tracker_selection_miss": [],
+              "wrong_track": []
+            }
+          }
+        },
+        "keyframes": {
+          "iou": {
+            "gt_frames": 377,
+            "track_matched": 30,
+            "track_recall": 0.0796,
+            "observed_track_matched": 28,
+            "observed_track_recall": 0.0743,
+            "confirmed_track_matched": 24,
+            "confirmed_track_recall": 0.0637,
+            "candidate_matched": 26,
+            "candidate_recall": 0.069,
+            "missed_no_matching_candidate": 351,
+            "missed_tracker_selection": 4,
+            "wrong_track_on_gt_frame": 347,
+            "no_track_on_gt_frame": 0,
+            "matched_track_iou": {
+              "mean": 0.3728,
+              "median": 0.3702
+            },
+            "matched_candidate_iou": {
+              "mean": 0.3798,
+              "median": 0.3734
+            },
+            "matched_track_segments": 7,
+            "sample_frames": {
+              "no_matching_candidate": [],
+              "tracker_selection_miss": [],
+              "wrong_track": []
+            }
+          },
+          "center": {
+            "rule": "predicted center within the GT box (half-diagonal radius)",
+            "gt_frames": 377,
+            "track_matched": 122,
+            "track_recall": 0.3236,
+            "observed_track_matched": 111,
+            "observed_track_recall": 0.2944,
+            "confirmed_track_matched": 92,
+            "confirmed_track_recall": 0.244,
+            "candidate_matched": 132,
+            "candidate_recall": 0.3501,
+            "missed_no_matching_candidate": 245,
+            "missed_tracker_selection": 26,
+            "wrong_track_on_gt_frame": 255,
+            "no_track_on_gt_frame": 0,
+            "matched_track_center_distance_px": {
+              "mean": 4.1273,
+              "median": 2.8617
+            },
+            "matched_candidate_center_distance_px": {
+              "mean": 4.8294,
+              "median": 3.724
+            },
+            "matched_track_segments": 29,
+            "sample_frames": {
+              "no_matching_candidate": [],
+              "tracker_selection_miss": [],
+              "wrong_track": []
+            }
+          }
+        }
+      }
+    }
+  }
+}

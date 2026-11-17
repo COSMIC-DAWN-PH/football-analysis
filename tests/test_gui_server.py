@@ -115,6 +115,7 @@ class GuiTestCase(unittest.TestCase):
                 "pitch_length_m": 105,
                 "pitch_width_m": 68,
                 "batch_size": 2,
+                "device": "intel:GPU",
                 "skip_seconds": 3,
                 "estimate_speed": True,
                 "annotate_possession": False,
@@ -125,6 +126,11 @@ class GuiTestCase(unittest.TestCase):
                 "club2_name": "Blue",
                 "club2_player": [30, 80, 220],
                 "club2_goalkeeper": [240, 220, 30],
+                "skip_goalkeeper_matching": True,
+                "referee_color": [241, 212, 71],
+                "ball_player_distance_gate": 1.2,
+                "ball_player_size_factor_gate": 2.2,
+                "ball_player_gate_minimum_players": 3,
             },
         }
 
@@ -136,6 +142,7 @@ class RepositoryTests(GuiTestCase):
         self.assertIn("--estimate-speed", spec.command)
         self.assertIn("--no-annotate-possession", spec.command)
         self.assertIn("--no-preview", spec.command)
+        self.assertIn("--skip-goalkeeper-matching", spec.command)
         self.assertEqual(
             spec.command[spec.command.index("--ball-model") + 1],
             "models/weights/ball-detection.pt",
@@ -143,8 +150,25 @@ class RepositoryTests(GuiTestCase):
         self.assertEqual(spec.command[spec.command.index("--pitch-length-m") + 1], "105.0")
         self.assertEqual(spec.command[spec.command.index("--pitch-width-m") + 1], "68.0")
         self.assertEqual(spec.command[spec.command.index("--batch-size") + 1], "2")
+        self.assertEqual(spec.command[spec.command.index("--device") + 1], "intel:GPU")
         self.assertEqual(spec.command[spec.command.index("--club1-player") + 1], "220,30,30")
+        self.assertEqual(
+            spec.command[spec.command.index("--referee-color") + 1], "241,212,71"
+        )
+        self.assertEqual(
+            spec.command[spec.command.index("--ball-player-distance-gate") + 1],
+            "1.2",
+        )
+        self.assertEqual(
+            spec.command[spec.command.index("--ball-player-size-factor-gate") + 1],
+            "2.2",
+        )
+        self.assertEqual(
+            spec.command[spec.command.index("--ball-player-gate-minimum-players") + 1],
+            "3",
+        )
         self.assertEqual(spec.options["tracks_dir"], "output_videos/demo/tracks")
+        self.assertEqual(spec.options["referee_color"], [241, 212, 71])
         self.assertIn(
             self.root / "output_videos" / "demo" / "tracks" / "calibration_tracks.jsonl",
             spec.expected_artifacts,
@@ -165,6 +189,43 @@ class RepositoryTests(GuiTestCase):
         payload["options"]["pitch_length_m"] = True
         with self.assertRaises(ApiProblem):
             self.repository.prepare_job(payload)
+
+    def test_analysis_rejects_invalid_advanced_options_and_duplicate_teams(self):
+        payload = self.analysis_payload()
+        payload["options"]["batch_size"] = 1.5
+        with self.assertRaises(ApiProblem):
+            self.repository.prepare_job(payload)
+
+        payload["options"]["batch_size"] = 1
+        payload["options"]["ball_player_size_factor_gate"] = 0.9
+        with self.assertRaises(ApiProblem):
+            self.repository.prepare_job(payload)
+
+        payload["options"]["ball_player_size_factor_gate"] = None
+        payload["options"]["club2_name"] = "red"
+        with self.assertRaises(ApiProblem) as problem:
+            self.repository.prepare_job(payload)
+        self.assertIn("必须不同", problem.exception.message)
+
+    def test_analysis_advanced_options_remain_optional(self):
+        payload = self.analysis_payload()
+        for key in (
+            "device",
+            "skip_goalkeeper_matching",
+            "referee_color",
+            "ball_player_distance_gate",
+            "ball_player_size_factor_gate",
+            "ball_player_gate_minimum_players",
+        ):
+            payload["options"].pop(key)
+
+        spec = self.repository.prepare_job(payload)
+        self.assertEqual(spec.command[spec.command.index("--device") + 1], "auto")
+        self.assertIn("--no-skip-goalkeeper-matching", spec.command)
+        self.assertNotIn("--referee-color", spec.command)
+        self.assertNotIn("--ball-player-distance-gate", spec.command)
+        self.assertNotIn("--ball-player-size-factor-gate", spec.command)
+        self.assertEqual(spec.options["ball_player_gate_minimum_players"], 2)
 
     def test_paths_cannot_escape_their_owned_root(self):
         with self.assertRaises(ApiProblem) as problem:
@@ -200,12 +261,22 @@ class RepositoryTests(GuiTestCase):
                 "fps": 25,
                 "pitch_length_m": 105,
                 "pitch_width_m": 68,
+                "club1_name": "Home",
+                "club2_name": "Away",
             },
         }
         spec = self.repository.prepare_job(payload)
         self.assertEqual(spec.command[spec.command.index("--fps") + 1], "25.0")
         self.assertEqual(spec.command[spec.command.index("--pitch-length-m") + 1], "105.0")
+        self.assertEqual(spec.command[spec.command.index("--club1-name") + 1], "Home")
+        self.assertEqual(spec.command[spec.command.index("--club2-name") + 1], "Away")
+        self.assertEqual(spec.options["club1_name"], "Home")
         payload["options"]["fps"] = 0
+        with self.assertRaises(ApiProblem):
+            self.repository.prepare_job(payload)
+
+        payload["options"]["fps"] = 25
+        payload["options"]["club2_name"] = "home"
         with self.assertRaises(ApiProblem):
             self.repository.prepare_job(payload)
 
@@ -418,8 +489,8 @@ class SummaryIntegrationTests(unittest.TestCase):
 
             objects = {"ball": {}, "goalkeeper": {}, "player": {}, "referee": {}}
             positions = {
-                "Red": [(100, 100), (150, 120), (200, 140)],
-                "Blue": [(300, 110), (350, 130), (400, 150)],
+                "主队": [(100, 100), (150, 120), (200, 140)],
+                "客队": [(300, 110), (350, 130), (400, 150)],
             }
             track_id = 1
             for team, points in positions.items():
@@ -452,6 +523,10 @@ class SummaryIntegrationTests(unittest.TestCase):
                     "1",
                     "--source",
                     str(source),
+                    "--club1-name",
+                    "主队",
+                    "--club2-name",
+                    "客队",
                     "--pitch-length-m",
                     "105",
                     "--pitch-width-m",
@@ -474,6 +549,10 @@ class SummaryIntegrationTests(unittest.TestCase):
                 path = output / filename
                 self.assertTrue(path.is_file(), filename)
                 self.assertGreater(path.stat().st_size, 0, filename)
+            report = (output / "REPORT.md").read_text(encoding="utf-8")
+            self.assertIn("| 指标 | 主队 | 客队 |", report)
+            summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(set(summary["teams"]), {"主队", "客队"})
 
 
 if __name__ == "__main__":

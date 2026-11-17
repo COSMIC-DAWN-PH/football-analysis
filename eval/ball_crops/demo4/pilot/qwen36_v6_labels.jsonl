@@ -1,0 +1,20 @@
+{"id":"demo4_b01723","label":"ball","reason":"tracked object is located in the central playing area among clustered players, consistent with ball position during active play"}
+{"id":"demo4_b01722","label":"ball","reason":"足球位于场内比赛区域，被红蓝两队球员围绕活动，红色跟踪框持续锁定绿茵场上白色小球，符合比赛用球特征"}
+{"id":"demo4_c00006","label":"ball","reason":"tracked white object is on the playing field within the active play area, moves consistently with ball trajectory across frames, and the crop shows a round white object consistent with a soccer ball"}
+{"id":"demo4_c00009","label":"not_ball","reason":"debris"}
+{"id":"demo4_b01721","label":"not_ball","reason":"debris"}
+{"id":"demo4_b01724","label":"not_ball","reason":"debris"}
+{"id":"demo4_c00012","label":"not_ball","reason":"other"}
+{"id":"demo4_b01725","label":"not_ball","reason":"other"}
+{"id":"demo4_b01727","label":"not_ball","reason":"debris"}
+{"id":"demo4_c00015","label":"not_ball","reason":"debris"}
+{"id":"demo4_c00017","label":"not_ball","reason":"debris"}
+{"id":"demo4_c00020","label":"not_ball","reason":"watermark"}
+{"id":"demo4_b01732","label":"not_ball","reason":"watermark"}
+{"id":"demo4_b01731","label":"not_ball","reason":"watermark"}
+{"id":"demo4_b01733","label":"not_ball","reason":"debris"}
+{"id":"demo4_c00024","label":"not_ball","reason":"debris"}
+{"id":"demo4_c00027","label":"not_ball","reason":"debris"}
+{"id":"demo4_c00030","label":"not_ball","reason":"debris"}
+{"id":"demo4_b01737","label":"not_ball","reason":"debris"}
+{"id":"demo4_c00033","label":"not_ball","reason":"debris"}

@@ -1,0 +1,20 @@
+{"id":"demo4_c00009","label":"ball","reason":""}
+{"id":"demo4_b01723","label":"ball","reason":""}
+{"id":"demo4_b01722","label":"ball","reason":""}
+{"id":"demo4_c00006","label":"not_ball","reason":"debris"}
+{"id":"demo4_b01721","label":"null","reason":"too small and blurry to confirm; tracked target is on-field near far goal area but isolated from player cluster, zoomed crop shows only an indistinct white blob"}
+{"id":"demo4_b01725","label":"not_ball","reason":"debris"}
+{"id":"demo4_c00012","label":"not_ball","reason":"debris"}
+{"id":"demo4_b01727","label":"not_ball","reason":"debris"}
+{"id":"demo4_c00015","label":"not_ball","reason":"debris"}
+{"id":"demo4_b01724","label":"not_ball","reason":"debris"}
+{"id":"demo4_c00017","label":"not_ball","reason":"debris"}
+{"id":"demo4_b01731","label":"not_ball","reason":"watermark"}
+{"id":"demo4_c00020","label":"not_ball","reason":"watermark"}
+{"id":"demo4_b01732","label":"not_ball","reason":"watermark"}
+{"id":"demo4_c00024","label":"not_ball","reason":"debris"}
+{"id":"demo4_c00027","label":"not_ball","reason":"other"}
+{"id":"demo4_b01733","label":"not_ball","reason":"debris"}
+{"id":"demo4_c00030","label":"not_ball","reason":"debris"}
+{"id":"demo4_c00033","label":"not_ball","reason":"debris"}
+{"id":"demo4_b01737","label":"not_ball","reason":"debris"}

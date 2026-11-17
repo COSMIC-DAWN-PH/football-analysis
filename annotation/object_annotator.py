@@ -46,6 +46,8 @@ class ObjectAnnotator(AbstractAnnotator):
 
                 # Annotate based on object type
                 if track == 'ball':
+                    if not item.get('track_confirmed', True):
+                        continue
                     frame = self.draw_triangle(frame, item['bbox'], self.ball_annotation_color)
                     speed_status = item.get('speed_status')
                     if speed_status == 'reliable' and 'speed' in item:
@@ -53,7 +55,16 @@ class ObjectAnnotator(AbstractAnnotator):
                     elif speed_status == 'pending':
                         frame = self.draw_ball_speed(frame, item['bbox'], None)
                 elif track == 'referee':
-                    frame = self.draw_ellipse(frame, item['bbox'], self.referee_annotation_color, track_id, -1, track)
+                    if item.get('club') is not None:
+                        # Referee-class track whose jersey matches a club:
+                        # draw it as a club player.
+                        frame = self.draw_ellipse(frame, item['bbox'], color, track_id, -1, 'player')
+                    else:
+                        frame = self.draw_ellipse(frame, item['bbox'], self.referee_annotation_color, track_id, -1, track)
+                elif item.get('referee'):
+                    # Player-class track whose jersey matches neither club:
+                    # draw it as a referee.
+                    frame = self.draw_ellipse(frame, item['bbox'], self.referee_annotation_color, track_id, -1, 'referee')
                 else:
                     # A missing speed means that speed estimation was deliberately
                     # disabled (for example on a low-FPS tactical sample).

@@ -30,3 +30,39 @@ output_videos/*
 # Generated learning/export artifacts
 lessons/
 training-data/
+
+logs/
+
+eval/finetune_dataset/
+
+# Ball review crop images and contact sheets (manifests/labels are committed)
+eval/ball_crops/*/crops/
+eval/ball_crops/*/sheets/
+eval/ball_crops/*/chunks/
+eval/ball_crops/*/sheet_ids.json
+eval/ball_crops/*/*_labels_part_*.jsonl
+eval/ball_crops/*/missing_block*.jsonl
+# Dual-model prelabel files are deprecated (manual-only workflow since 2026-08-16)
+eval/ball_crops/*/*_labels.jsonl
+
+# VLM pilot artifacts: binary media stays local, text (reports/manifests/labels) is committed
+eval/ball_crops/*/pilot/clips*/
+eval/ball_crops/*/pilot/context/
+eval/ball_crops/*/pilot/extracted*/
+eval/ball_crops/*/pilot/frames*/
+eval/ball_crops/*/pilot/strips*/
+
+# Local recovery copies from the video GT annotation server
+eval/ball_gt/*/annotations.jsonl.bak
+eval/ball_gt/*/backups/
+
+# Local browser state from annotation UI smoke tests
+.playwright-cli/
+
+# OpenCode/OpenChamber local state
+.opencode/
+.openchamber/
+*.traineddata
+
+# Presentation artifacts from the slides skill
+.frontend-slides/

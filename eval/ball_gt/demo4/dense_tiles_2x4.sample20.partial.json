@@ -1,0 +1,24 @@
+{
+  "scope": "empty keyframes plus empty-primary pilot",
+  "device": "intel:GPU",
+  "grid": {
+    "rows": 2,
+    "columns": 4,
+    "overlap": 0.2
+  },
+  "processed_frames": 40,
+  "gt_frames": 20,
+  "gt_raw_rescued": 0,
+  "gt_gated_rescued": 0,
+  "pilot_items": 20,
+  "pilot_raw_false_matches": 8,
+  "pilot_gated_false_matches": 3,
+  "raw_candidates": 562,
+  "gated_candidates": 67,
+  "inference_seconds_per_trigger_frame": {
+    "mean": 0.3336,
+    "median": 0.2774,
+    "max": 2.4757
+  },
+  "inference_seconds_total": 13.345
+}
